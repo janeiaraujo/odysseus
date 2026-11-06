@@ -19,6 +19,8 @@ from src.jarvis.models import Device
 from src.secret_storage import decrypt, encrypt
 
 TEMP_RANGE = (16.0, 30.0)
+_OP_LABELS = {"on": "Ligar", "off": "Desligar", "open": "Abrir", "close": "Fechar", "lock": "Trancar", "unlock": "Destrancar",
+              "arm": "Armar", "disarm": "Desarmar", "set_temperature": "Ajustar temperatura de"}
 _OPS: Dict[str, Dict[str, tuple]] = {
     "light": {"on": ("turn_on", policy.REVERSIBLE), "off": ("turn_off", policy.REVERSIBLE)},
     "switch": {"on": ("turn_on", policy.REVERSIBLE), "off": ("turn_off", policy.REVERSIBLE)},
@@ -211,5 +213,5 @@ policy.register_executor("home.control", _approved_executor)
 async def execute(device: Dict[str, Any], op: str, value: Any = None, *, owner: Optional[str] = "", transport: Any = None) -> Dict[str, Any]:
     action = build_action(device, op, value)
     return await policy.guarded(
-        "home.control", action.risk, owner, f"{action.service} em {action.name}",
+        "home.control", action.risk, owner, f"{_OP_LABELS.get(op, op)} {action.name}",
         {"device_id": device["id"], "op": op, "value": value}, lambda: _call(action, transport))

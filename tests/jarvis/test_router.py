@@ -169,3 +169,21 @@ def test_persona_is_static_ptbr_and_can_be_disabled():
     assert persona.system_preface() == text
     config.update_config({"persona": {"enabled": False}})
     assert persona.system_preface() == ""
+
+
+def test_direct_shortcut_keeps_identity_memory_and_recent_turns():
+    from src.prompt_security import untrusted_context_message
+    memory_msg = untrusted_context_message("jarvis memory", "Time: Sport")
+    msgs = [{"role": "system", "content": "persona"}, memory_msg] + [{"role": "user", "content": f"u{i}"} for i in range(10)]
+    out = persona.direct_reply_messages(msgs, "u9")
+    assert out[0]["content"] == "persona" and out[1] is memory_msg
+    assert [m["content"] for m in out[2:]] == [f"u{i}" for i in range(4, 10)]
+
+
+def test_direct_shortcut_is_unchanged_with_persona_disabled():
+    config.update_config({"persona": {"enabled": False}})
+    assert persona.direct_reply_messages([{"role": "system", "content": "x"}, {"role": "user", "content": "oi"}], "oi") == [{"role": "user", "content": "oi"}]
+
+
+def test_direct_shortcut_handles_missing_history():
+    assert persona.direct_reply_messages([], "oi")[-1] == {"role": "user", "content": "oi"}

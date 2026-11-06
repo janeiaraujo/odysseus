@@ -2021,7 +2021,8 @@ async def stream_agent_loop(
     _mcp_disabled_map = _load_mcp_disabled_map() if mcp_mgr else {}
     if _direct_low_signal:
         logger.info("[agent] direct low-signal reply path for latest=%r", _last_user[:80])
-        direct_messages = [{"role": "user", "content": _last_user}]
+        from src.jarvis.persona import direct_reply_messages
+        direct_messages = direct_reply_messages(messages, _last_user)
         direct_response = ""
         direct_start = time.time()
         direct_actual_model = model

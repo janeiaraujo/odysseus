@@ -214,7 +214,7 @@ def _local(iso: Optional[str]) -> str:
     if not iso:
         return "data desconhecida"
     moment = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(agenda.local_tz())
-    return moment.strftime("%d/%m as %H:%M")
+    return moment.strftime("%d/%m às %H:%M")
 
 
 async def _do_device(text: str, owner: str) -> Optional[str]:
