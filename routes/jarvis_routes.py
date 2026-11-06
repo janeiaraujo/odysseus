@@ -678,6 +678,47 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         return {"forgotten": jbrowser.forget_session(_admin(request))}
 
     # --- Storage, backup, replication, monitoring (system-wide: admin) ---
+    @r.post("/credentials/{kind}")
+    async def credentials_upload(kind: str, request: Request, file: UploadFile = File(...)):
+        """Install a key downloaded from Google. Kept with mode 600, never echoed back."""
+        import json as _json
+
+        from src.constants import JARVIS_CREDENTIALS_DIR
+        owner = _admin(request)
+        if kind not in ("google", "firebase"):
+            raise HTTPException(404, "tipo de credencial desconhecido")
+        raw = await file.read(64 * 1024 + 1)
+        try:
+            data = _json.loads(raw)
+        except ValueError:
+            raise HTTPException(400, "o arquivo não é um JSON válido") from None
+        if len(raw) > 64 * 1024 or not isinstance(data, dict):
+            raise HTTPException(400, "arquivo inesperado")
+        if kind == "firebase" and not (data.get("type") == "service_account" and data.get("private_key") and data.get("client_email")):
+            raise HTTPException(400, "este arquivo não é uma chave de conta de serviço")
+        if kind == "google" and not (data.get("web") or {}).get("client_secret"):
+            raise HTTPException(400, "este arquivo não é um cliente OAuth do tipo Aplicativo da Web")
+        os.makedirs(JARVIS_CREDENTIALS_DIR, mode=0o700, exist_ok=True)
+        target = Path(JARVIS_CREDENTIALS_DIR) / ("firebase-sa.json" if kind == "firebase" else "google-oauth-client.json")
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        audit.record("credentials.install", owner=owner, risk="reversible", target=kind)
+        if kind == "google":
+            return {"installed": True, "configured": oauth.is_configured()}
+        config.update_config({"firebase": {"enabled": True, "project_id": data.get("project_id", ""), "credentials_file": str(target)}})
+        from src.jarvis.firebase import check_connection
+        try:
+            return {"installed": True, "check": await check_connection()}
+        except Exception as exc:
+            return {"installed": True, "check": {"ok": False, "error": redact_text(exc)[:200]}}
+
+    @r.post("/firebase/check")
+    async def firebase_check(request: Request):
+        _admin(request)
+        from src.jarvis.firebase import check_connection
+        return await check_connection()
+
     @r.get("/storage")
     async def storage_status(request: Request):
         _admin(request)

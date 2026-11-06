@@ -71,7 +71,8 @@ def http_client(timeout: float = 30) -> httpx.AsyncClient:
 
 
 def _client_file() -> Optional[str]:
-    for path in (os.environ.get("JARVIS_GOOGLE_CLIENT_FILE", ""), "/app/secrets/google-oauth-client.json",
+    from src.constants import JARVIS_CREDENTIALS_DIR
+    for path in (os.environ.get("JARVIS_GOOGLE_CLIENT_FILE", ""), os.path.join(JARVIS_CREDENTIALS_DIR, "google-oauth-client.json"), "/app/secrets/google-oauth-client.json",
                  os.path.expanduser("~/.config/jarvis/google-oauth-client.json")):
         if path and os.path.isfile(path):
             return path

@@ -149,3 +149,13 @@ class FirestoreClient:
         url = f"https://fcm.googleapis.com/v1/projects/{self.project_id}/messages:send"
         resp = await self._request("POST", url, json={"message": {"token": device_token, "notification": {"title": title, "body": body}}})
         resp.raise_for_status()
+
+
+async def check_connection(client: Optional[FirestoreClient] = None) -> Dict[str, Any]:
+    """Real round trip against Firestore: write, read back, delete."""
+    client = client or FirestoreClient.from_config()
+    path = f"_jarvis/healthcheck-{int(time.time())}"
+    await client.upsert(path, {"ok": True})
+    read = await client.get(path)
+    await client.delete(path)
+    return {"ok": bool(read and read.get("ok")), "project": client.project_id, "deleted": await client.get(path) is None}

@@ -266,3 +266,29 @@ def test_read_sensor_and_camera_with_mock(monkeypatch):
     assert asyncio.run(home.camera_snapshot(camera, owner="ana", transport=transport)) == b"jpeg"
     with pytest.raises(home.UnsafeAction):
         asyncio.run(home.camera_snapshot(sensor, owner="ana", transport=transport))
+
+
+def test_credentials_upload_validates_stores_privately_and_never_echoes(client, monkeypatch, tmp_path):
+    import os
+    monkeypatch.setattr("src.constants.JARVIS_CREDENTIALS_DIR", str(tmp_path / "cred"))
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    send = lambda kind, data, who=ADMIN: client.post(f"/api/jarvis/credentials/{kind}", headers=who, files={"file": ("k.json", data)})
+    google = json.dumps({"web": {"client_id": "abc.apps", "client_secret": "segredo-do-cliente"}})
+    assert send("google", google, ANA).status_code == 403
+    assert send("google", "nao json").status_code == 400
+    assert send("google", '{"installed": {}}').status_code == 400
+    assert send("firebase", google).status_code == 400
+    assert send("outro", google).status_code == 404
+    response = send("google", google)
+    assert response.json() == {"installed": True, "configured": True} and "segredo" not in response.text
+    assert os.stat(tmp_path / "cred" / "google-oauth-client.json").st_mode & 0o077 == 0
+
+
+def test_firebase_upload_reports_a_failed_check_without_leaking(client, monkeypatch, tmp_path):
+    monkeypatch.setattr("src.constants.JARVIS_CREDENTIALS_DIR", str(tmp_path / "cred"))
+    key = json.dumps({"type": "service_account", "private_key": "nao-e-uma-chave", "client_email": "a@b", "project_id": "p"})
+    response = client.post("/api/jarvis/credentials/firebase", headers=ADMIN, files={"file": ("k.json", key)})
+    body = response.json()
+    assert body["installed"] and body["check"]["ok"] is False and "nao-e-uma-chave" not in response.text
+    assert config.get("firebase.enabled") is True
