@@ -60,7 +60,8 @@ def main() -> None:
     p.add_argument("--out")
     p.add_argument("--data-dir", default=os.getenv("ODYSSEUS_DATA_DIR", "data"))
     p.add_argument("--env-file", default=".env")
-    p.add_argument("--no-secrets", action="store_true", help="omite .app_key, auth, sessoes, vault e .env")
+    p.add_argument("--no-secrets", action="store_true", help="omite .app_key, auth, sessoes, vault, .env e o diretorio de segredos")
+    p.add_argument("--secrets-dir", default=str(Path.home() / ".config" / "jarvis"), help="chaves externas, como a do Firebase")
     p.add_argument("--no-chroma", action="store_true")
     p = sub.add_parser("verify")
     p.add_argument("path")
@@ -70,6 +71,7 @@ def main() -> None:
     p.add_argument("--key-file")
     p.add_argument("--data-dir", required=True)
     p.add_argument("--env-target")
+    p.add_argument("--secrets-target", default=str(Path.home() / ".config" / "jarvis"))
     p.add_argument("--force", action="store_true", help="move o conteudo atual para o lado antes de restaurar")
     p.add_argument("--no-chroma", action="store_true")
     p = sub.add_parser("validate")
@@ -95,13 +97,13 @@ def main() -> None:
         elif args.cmd == "create":
             out = Path(args.out or Path.home() / "jarvis-backups" / f"jarvis-{datetime.now():%Y%m%d-%H%M%S}.jrvb").expanduser()
             _emit(backup.create_backup(out, _key(args), data_dir=Path(args.data_dir), env_file=Path(args.env_file),
-                                       include_secrets=not args.no_secrets, chroma_client=_chroma(args), repo=REPO))
+                                       include_secrets=not args.no_secrets, chroma_client=_chroma(args), repo=REPO, secrets_dir=Path(args.secrets_dir)))
         elif args.cmd == "verify":
             _emit(backup.verify_backup(Path(args.path), _key(args)))
         elif args.cmd == "restore":
             _emit(backup.restore_backup(Path(args.path), _key(args), data_dir=Path(args.data_dir),
                                         env_target=Path(args.env_target) if args.env_target else None,
-                                        force=args.force, chroma_client=_chroma(args)))
+                                        force=args.force, chroma_client=_chroma(args), secrets_target=Path(args.secrets_target)))
         elif args.cmd == "validate":
             report = backup.validate_restored(Path(args.data_dir))
             _emit(report)

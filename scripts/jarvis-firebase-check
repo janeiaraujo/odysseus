@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""jarvis-firebase-check: real round trip against Firestore, on a temporary database.
+
+    scripts/jarvis-firebase-check [--key ~/.config/jarvis/firebase-sa.json] [--project ID]
+
+Writes one encrypted test document, reads it back, deletes it, and confirms that
+anonymous access is denied. Touches neither your memories nor the key's contents.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import stat
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+os.chdir(REPO)
+
+
+async def run(key: Path, project: str, base: Path) -> dict:
+    os.environ["ODYSSEUS_DATA_DIR"] = str(base)
+    os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+    import httpx
+
+    from src.jarvis import config, db, firebase, memory, replication
+
+    config.JARVIS_CONFIG_FILE = str(base / "config.json")
+    db.configure(f"sqlite:///{base / 'jarvis.db'}")
+    memory._vector_failed = True
+    config.update_config({"firebase": {"enabled": True, "project_id": project, "credentials_file": str(key)}})
+    client = firebase.FirestoreClient.from_config()
+    owner = "_jarvis_firebase_check_"
+    item = memory.remember("Teste de replicação do Jarvis", owner=owner)["item"]
+    path = f"users/{replication.owner_key(owner)}/memory/{item['id']}"
+    sent = await replication.flush(client)
+    doc = await client.get(path) or {}
+    memory.delete(item["id"], owner=owner)
+    removed = await replication.flush(client)
+    after = await client.get(path)
+    report = {"project": client.project_id, "written": sent["sent"] == 1, "read_back": bool(doc), "encrypted": str(doc.get("text_enc", "")).startswith("enc:"),
+              "plaintext_absent": "replicação" not in json.dumps(doc, ensure_ascii=False), "deleted": removed["sent"] == 1 and after is None, "outbox_empty": replication.status()["pending"] == 0}
+    if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        async with httpx.AsyncClient(timeout=15) as anon:
+            report["anonymous_denied"] = (await anon.get(f"{client.base}/users")).status_code in (401, 403)
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--key", default=str(Path.home() / ".config" / "jarvis" / "firebase-sa.json"))
+    parser.add_argument("--project", default=os.environ.get("JARVIS_FIREBASE_PROJECT", ""))
+    args = parser.parse_args()
+    key = Path(args.key).expanduser()
+    if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        if not key.is_file():
+            print(f"erro: chave nao encontrada em {key}", file=sys.stderr)
+            return 2
+        if stat.S_IMODE(key.stat().st_mode) & 0o077:
+            print(f"erro: permissoes abertas; rode: chmod 600 {key}", file=sys.stderr)
+            return 2
+    with tempfile.TemporaryDirectory(prefix="jarvis-fb-") as tmp:
+        try:
+            report = asyncio.run(run(key, args.project, Path(tmp)))
+        except Exception as exc:
+            from src.jarvis.redact import redact_text
+            print(f"erro: {type(exc).__name__}: {redact_text(exc)[:300]}", file=sys.stderr)
+            return 1
+    print(json.dumps(report, ensure_ascii=False, indent=1))
+    return 0 if all(v for k, v in report.items() if k != "project") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

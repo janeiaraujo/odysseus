@@ -136,3 +136,9 @@ def test_against_official_firestore_emulator():
     memory.delete(item["id"], owner="ana")
     asyncio.run(replication.flush(client))
     assert asyncio.run(client.get(path)) is None
+
+
+def test_env_switch_enables_replication(monkeypatch):
+    monkeypatch.setenv("JARVIS_FIREBASE_ENABLED", "true")
+    memory.remember("Via variavel de ambiente", owner="ana")
+    assert replication.status() == {"enabled": True, "pending": 1, "stuck": 0}

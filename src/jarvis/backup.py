@@ -203,7 +203,7 @@ def _git_commit(repo: Optional[Path]) -> str:
 
 
 def create_backup(out_path: Path, passphrase: str, *, data_dir: Path, env_file: Optional[Path] = None, include_secrets: bool = True,
-                  chroma_client: Any = None, repo: Optional[Path] = None) -> Dict[str, Any]:
+                  chroma_client: Any = None, repo: Optional[Path] = None, secrets_dir: Optional[Path] = None) -> Dict[str, Any]:
     out_path, data_dir = Path(out_path), Path(data_dir)
     if data_dir.resolve() in out_path.resolve().parents:
         raise BackupError("o backup não pode ficar dentro do diretório de dados")
@@ -224,6 +224,12 @@ def create_backup(out_path: Path, passphrase: str, *, data_dir: Path, env_file: 
             if include_secrets and env_file and Path(env_file).is_file():
                 files.append({"path": "env/.env", "sha256": _sha256(Path(env_file)), "size": Path(env_file).stat().st_size})
                 tar.add(env_file, arcname="env/.env", recursive=False)
+            if include_secrets and secrets_dir and Path(secrets_dir).is_dir():
+                for path in sorted(Path(secrets_dir).iterdir()):
+                    if path.is_file() and not path.is_symlink():
+                        arc = f"secrets/{path.name}"
+                        files.append({"path": arc, "sha256": _sha256(path), "size": path.stat().st_size})
+                        tar.add(path, arcname=arc, recursive=False)
             chroma_counts: Optional[Dict[str, int]] = None
             if chroma_client is not None:
                 chroma_dir = tmp / "chroma"
@@ -250,7 +256,7 @@ def _safe_members(tar: tarfile.TarFile) -> List[tarfile.TarInfo]:
         parts = Path(member.name).parts
         if member.name.startswith("/") or ".." in parts or not (member.isfile() or member.isdir()):
             raise BackupError(f"entrada insegura no backup: {member.name}")
-        if parts and parts[0] not in ("data", "env", "chroma", "manifest.json"):
+        if parts and parts[0] not in ("data", "env", "chroma", "secrets", "manifest.json"):
             raise BackupError(f"entrada inesperada no backup: {member.name}")
         members.append(member)
     return members
@@ -295,7 +301,7 @@ def verify_backup(path: Path, passphrase: str) -> Dict[str, Any]:
 
 
 def restore_backup(path: Path, passphrase: str, *, data_dir: Path, env_target: Optional[Path] = None, force: bool = False,
-                   chroma_client: Any = None) -> Dict[str, Any]:
+                   chroma_client: Any = None, secrets_target: Optional[Path] = None) -> Dict[str, Any]:
     """Restore into data_dir. A non-empty target needs force, and is moved aside, never overwritten."""
     data_dir = Path(data_dir)
     moved_to = None
@@ -328,8 +334,20 @@ def restore_backup(path: Path, passphrase: str, *, data_dir: Path, env_target: O
             shutil.copy2(root / "env" / ".env", env_target)
             os.chmod(env_target, 0o600)
             env_restored = True
+        secrets_restored = 0
+        if secrets_target and (root / "secrets").is_dir():
+            target_dir = Path(secrets_target)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(target_dir, 0o700)
+            for source in sorted((root / "secrets").iterdir()):
+                target = target_dir / source.name
+                if target.exists() and not force:
+                    raise BackupError(f"{target} ja existe; use force")
+                shutil.copy2(source, target)
+                os.chmod(target, 0o600)
+                secrets_restored += 1
         chroma_counts = import_chroma(chroma_client, root / "chroma") if chroma_client is not None and (root / "chroma").exists() else None
-    return {"ok": True, "restored_files": restored, "moved_previous_to": str(moved_to) if moved_to else None, "env_restored": env_restored, "chroma": chroma_counts}
+    return {"ok": True, "restored_files": restored, "moved_previous_to": str(moved_to) if moved_to else None, "env_restored": env_restored, "secrets_restored": secrets_restored, "chroma": chroma_counts}
 
 
 def validate_restored(data_dir: Path) -> Dict[str, Any]:

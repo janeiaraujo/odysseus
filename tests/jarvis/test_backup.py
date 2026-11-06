@@ -184,3 +184,26 @@ def test_mismatched_key_reported_by_validation(tmp_path, source):
     (data / ".app_key").write_bytes(Fernet.generate_key())
     report = backup.validate_restored(data)
     assert not report["ok"] and report["encrypted_keys"]["unreadable"] == 1
+
+
+def test_secrets_dir_travels_encrypted_with_strict_permissions(tmp_path, source):
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "firebase-sa.json").write_text('{"private_key": "chave-ultra-secreta"}')
+    out, _ = _backup(tmp_path, source, secrets_dir=secrets)
+    assert b"chave-ultra-secreta" not in out.read_bytes()
+    target = tmp_path / "novo-secrets"
+    result = backup.restore_backup(out, KEY, data_dir=tmp_path / "t", secrets_target=target)
+    assert result["secrets_restored"] == 1 and "ultra" in (target / "firebase-sa.json").read_text()
+    assert os.stat(target / "firebase-sa.json").st_mode & 0o077 == 0 and os.stat(target).st_mode & 0o077 == 0
+    with pytest.raises(backup.BackupError, match="ja existe|já existe"):
+        backup.restore_backup(out, KEY, data_dir=tmp_path / "t2", secrets_target=target)
+
+
+def test_no_secrets_mode_skips_secrets_dir(tmp_path, source):
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    (secrets / "k.json").write_text("x")
+    out, info = _backup(tmp_path, source, secrets_dir=secrets, include_secrets=False)
+    target = tmp_path / "s2"
+    assert backup.restore_backup(out, KEY, data_dir=tmp_path / "t", secrets_target=target)["secrets_restored"] == 0

@@ -66,7 +66,10 @@ def load_config() -> Dict[str, Any]:
             stored = {}
     except (OSError, ValueError):
         stored = {}
-    return _deep_merge(DEFAULTS, stored)
+    merged = _deep_merge(DEFAULTS, stored)
+    if os.environ.get("JARVIS_FIREBASE_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
+        merged["firebase"]["enabled"] = True  # deployment switch, in .env with the credentials
+    return merged
 
 
 def get(path: str, default: Any = None) -> Any:

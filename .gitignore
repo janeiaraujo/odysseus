@@ -27,6 +27,9 @@ secrets.env.*
 # Data — all user data stays local
 data/
 backups/
+secrets/
+*firebase-adminsdk*.json
+*firebase-sa*.json
 *.jrvb
 *recovery.key
 !services/hwfit/data/

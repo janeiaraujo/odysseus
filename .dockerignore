@@ -53,3 +53,6 @@ timetree*.png
 backups/
 *.jrvb
 *recovery.key
+secrets/
+*firebase-adminsdk*.json
+*firebase-sa*.json
