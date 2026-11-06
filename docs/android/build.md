@@ -1,3 +1,3 @@
 # Build Android
 
-Planejado; veja a [arquitetura](architecture.md).
+Veja o repositório `janeiaraujo/jarvis-android` e a [arquitetura](architecture.md).

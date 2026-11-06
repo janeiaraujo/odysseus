@@ -35,7 +35,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | Voz e modo conversa | 🟡 | Navegador real com fala sintetizada em português (Piper) como microfone: botão de microfone, modo conversa, interrupção por fala, ruído e cliques ignorados, botão de ouvir. Modelo do chat falso nesse teste. **Falta validar com voz humana e microfone físico** |
 | Palavra de ativação | 🟡 | Por transcrição; sem teste com áudio real |
 | Fine-tuning | 🟡 | Dados testados; treino nunca executado (sem GPU) |
-| Android | 📋 | Adiado a pedido do usuário |
+| Android | 🟡 | App próprio em `janeiaraujo/jarvis-android`; versão só com Firestore em branch, ainda não instalada |
 
 ## Cenários obrigatórios
 
@@ -43,7 +43,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 |---|---|---|
 | 1 | Inicia preservando o ambiente | ✅ Com dados restaurados; stack atual intocada |
 | 2 | Memória sobrevive ao reinício | ✅ Aplicação real e ChromaDB real |
-| 3 | App conversa com o backend | 📋 Android adiado |
+| 3 | App conversa com o backend | Não se aplica: o app roda sozinho, sem este servidor |
 | 4 | Modelo indisponível não derruba | ✅ Provedor derrubado de verdade: erro claro, saúde preservada |
 | 5 | Fallback respeita custo | 🧪 Testes do filtro; sem falha real de provedor |
 | 6 | Evento consultado corretamente | ✅ Tabelas reais e recorrência |
