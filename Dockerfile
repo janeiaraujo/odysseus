@@ -47,7 +47,7 @@ ARG JARVIS_EXTRAS=false
 COPY requirements.txt requirements-optional.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi \
-    && if [ "$JARVIS_EXTRAS" = "true" ]; then pip install --no-cache-dir faster-whisper "av<17" playwright==1.64.1; fi
+    && if [ "$JARVIS_EXTRAS" = "true" ]; then pip install --no-cache-dir faster-whisper "av<17" piper-tts playwright==1.64.1; fi
 
 # Copy app code
 COPY . .

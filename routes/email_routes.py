@@ -1015,7 +1015,8 @@ def setup_email_routes():
 
             return {"emails": emails, "total": total, "folder": folder, "offset": offset}
         except Exception as e:
-            logger.error(f"Failed to list emails: {e}")
+            # No mailbox configured yet is a state, not an error worth a log line a minute.
+            logger.log(logging.DEBUG if isinstance(e, ConnectionRefusedError) else logging.ERROR, f"Failed to list emails: {e}")
             detail = str(e).strip()
             return {"emails": [], "total": 0, "error": f"Mail operation failed: {detail[:180]}" if detail else "Mail operation failed"}
         finally:

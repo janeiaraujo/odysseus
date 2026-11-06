@@ -42,6 +42,27 @@ def status() -> Dict[str, Any]:
     return out
 
 
+def warm_up() -> Dict[str, bool]:
+    """Load the speech models ahead of time, so the first word isn't met with a long pause."""
+    loaded = {"stt": False, "tts": False}
+    try:
+        from services.stt import get_stt_service
+        service = get_stt_service()
+        if service.available and service._load_settings().get("stt_provider") == "local":
+            loaded["stt"] = service._get_whisper() is not None
+    except Exception as exc:
+        logger.warning("Whisper warm-up failed: %s", exc)
+    try:
+        from services.tts import get_tts_service
+        service = get_tts_service()
+        settings = service._load_settings()
+        if service.available and settings.get("tts_provider") == "piper":
+            loaded["tts"] = service._get_piper(settings.get("tts_voice", "")) is not None
+    except Exception as exc:
+        logger.warning("Piper warm-up failed: %s", exc)
+    return loaded
+
+
 def _speak(text: str) -> Optional[str]:
     try:
         from services.tts import get_tts_service

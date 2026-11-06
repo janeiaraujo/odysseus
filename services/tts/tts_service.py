@@ -2,6 +2,7 @@
 """Multi-provider TTS service — dispatches to local Kokoro, OpenAI-compatible API, or browser."""
 
 import io
+import os
 import wave
 import logging
 import hashlib
@@ -9,7 +10,7 @@ import httpx
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from src.constants import TTS_CACHE_DIR
+from src.constants import TTS_CACHE_DIR, TTS_MODELS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,9 @@ def _safe_speed(value, default: float = 1.0) -> float:
     except (TypeError, ValueError):
         return default
     return speed if speed > 0 else default
+
+
+PIPER_DEFAULT_VOICE = "pt_BR-faber-medium"
 
 
 class TTSService:
@@ -68,6 +72,8 @@ class TTSService:
         if provider == "local":
             kokoro = self._get_kokoro()
             return kokoro is not None and kokoro.available
+        if provider == "piper":
+            return self._piper_installed()
         if provider.startswith("endpoint:"):
             return True  # assume reachable; errors surface at synthesis time
         return False
@@ -104,6 +110,48 @@ class TTSService:
         return self._kokoro
 
     # ── API endpoint ──
+
+    # ── Piper: fast on CPU, offline after the first download, and speaks pt-BR ──
+
+    @staticmethod
+    def _piper_installed() -> bool:
+        import importlib.util
+        return importlib.util.find_spec("piper") is not None
+
+    def _get_piper(self, voice: str = ""):
+        name = voice if (voice or "").startswith(("pt_", "en_", "es_")) else PIPER_DEFAULT_VOICE
+        loaded = getattr(self, "_piper_voices", None)
+        if loaded is None:
+            loaded = self._piper_voices = {}
+        if name not in loaded:
+            from piper import PiperVoice
+            os.makedirs(TTS_MODELS_DIR, exist_ok=True)
+            model_path = os.path.join(TTS_MODELS_DIR, f"{name}.onnx")
+            lang, speaker, quality = name.split("-")
+            base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/{lang.split('_')[0]}/{lang}/{speaker}/{quality}/{name}"
+            for suffix, target in ((".onnx", model_path), (".onnx.json", model_path + ".json")):
+                if not os.path.isfile(target):
+                    logger.info("Downloading Piper voice file %s", os.path.basename(target))
+                    with httpx.stream("GET", base + suffix, follow_redirects=True, timeout=300) as response:
+                        response.raise_for_status()
+                        tmp = target + ".part"
+                        with open(tmp, "wb") as f:
+                            for block in response.iter_bytes():
+                                f.write(block)
+                    os.replace(tmp, target)
+            loaded[name] = PiperVoice.load(model_path)
+        return loaded[name]
+
+    def _synthesize_piper(self, text: str, voice: str = "") -> Optional[bytes]:
+        try:
+            model = self._get_piper(voice)
+            buffer = io.BytesIO()
+            with wave.open(buffer, "wb") as wav:
+                model.synthesize_wav(text, wav)
+            return buffer.getvalue()
+        except Exception as e:
+            logger.error(f"Piper synthesis failed: {e}", exc_info=True)
+            return None
 
     def _synthesize_api(self, text: str, endpoint_id: str, model: str, voice: str, speed: float = 1.0) -> Optional[bytes]:
         from src.database import SessionLocal, ModelEndpoint
@@ -174,6 +222,8 @@ class TTSService:
             else:
                 logger.warning("Kokoro TTS not available")
                 return None
+        elif provider == "piper":
+            audio_data = self._synthesize_piper(text, voice)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             audio_data = self._synthesize_api(text, endpoint_id, model, voice, speed)

@@ -1315,6 +1315,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
             if (data === '[DONE]') {
               _streamSawDone = true;
+              if (!_isBg) document.dispatchEvent(new CustomEvent('jarvis:assistant-done', { detail: { text: accumulated, sessionId: streamSessionId } }));
               // Always update background map if entry exists (even if user switched back)
               var bgDone = _backgroundStreams.get(streamSessionId);
               if (bgDone) {

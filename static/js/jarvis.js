@@ -160,7 +160,7 @@ function speak(reply, audioB64) {
   stopSpeaking();
   if (audioB64) {
     const bytes = Uint8Array.from(atob(audioB64), (c) => c.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    const url = URL.createObjectURL(new Blob([bytes], { type: audioB64.startsWith('UklGR') ? 'audio/wav' : 'audio/mpeg' }));
     voiceState.audio = new Audio(url);
     voiceState.audio.addEventListener('ended', () => URL.revokeObjectURL(url));
     voiceState.audio.volume = Number(document.getElementById('jarvis-volume')?.value ?? 1);
@@ -235,15 +235,13 @@ function encodeWav(chunks, sampleRate) {
 }
 
 /**
- * Hands-free: voice detection runs locally, on raw samples, keeping about a second
- * of audio from before speech starts. Without it the start of a phrase, which is
- * exactly the wake word, would be lost. Audio leaves only when speech was detected.
+ * Local voice detection on raw samples, keeping about a second of audio from before
+ * speech starts: without it the start of a phrase, which is exactly the wake word,
+ * would be lost. Audio only leaves the browser when speech was detected.
+ * `threshold()` lets callers demand a louder voice, e.g. while the assistant talks.
  */
-async function startHandsFree(log) {
-  const stream = await openMic();
-  voiceState.handsFree = true;
+async function createDetector(stream, onSegment, { floorMultiplier = () => 3, onSpeech = () => {}, onLevel = () => {} } = {}) {
   const ctx = new AudioContext();
-  voiceState.ctx = ctx;
   await ctx.resume();
   const source = ctx.createMediaStreamSource(stream);
   const processor = ctx.createScriptProcessor(4096, 1, 1);
@@ -259,32 +257,52 @@ async function startHandsFree(log) {
   const preRoll = [];
   let speech = null;
   let quiet = 0;
-  setMic(true, 'ouvindo: diga "Jarvis"');
+  let floor = 0.003; // room noise, learned while nobody is talking: mics differ a lot
   processor.onaudioprocess = (event) => {
     const block = new Float32Array(event.inputBuffer.getChannelData(0));
     const energy = Math.sqrt(block.reduce((sum, v) => sum + v * v, 0) / block.length);
+    onLevel(energy);
+    const multiplier = floorMultiplier();
+    if (multiplier === null) { // paused: don't listen at all
+      speech = null;
+      preRoll.length = 0;
+      return;
+    }
+    const needed = Math.max(0.006, floor * multiplier);
     if (!speech) {
-      if (energy > 0.02) {
-        stopSpeaking(); // barge-in: talking interrupts the assistant
+      if (energy > needed) {
+        onSpeech();
         speech = [...preRoll, block];
         preRoll.length = 0;
         quiet = 0;
       } else {
+        floor += (energy - floor) * 0.05;
         preRoll.push(block);
         if (preRoll.length > preRollBlocks) preRoll.shift();
       }
       return;
     }
     speech.push(block);
-    quiet = energy > 0.02 ? 0 : quiet + 1;
+    quiet = energy > Math.max(0.005, floor * 2) ? 0 : quiet + 1;
     if (quiet >= silenceBlocks || speech.length >= maxBlocks) {
-      const form = new FormData();
-      form.append('audio', encodeWav(speech, ctx.sampleRate), 'fala.wav');
-      form.append('wake_word', 'true');
+      const blob = encodeWav(speech, ctx.sampleRate);
       speech = null;
-      sendTurn(form, log);
+      onSegment(blob);
     }
   };
+  return ctx;
+}
+
+async function startHandsFree(log) {
+  const stream = await openMic();
+  voiceState.handsFree = true;
+  setMic(true, 'ouvindo: diga "Jarvis"');
+  voiceState.ctx = await createDetector(stream, (blob) => {
+    const form = new FormData();
+    form.append('audio', blob, 'fala.wav');
+    form.append('wake_word', 'true');
+    sendTurn(form, log);
+  }, { onSpeech: stopSpeaking });
 }
 
 function browserRecognizer(onText, { continuous = false } = {}) {
@@ -416,7 +434,7 @@ async function renderMemoria(root) {
     return line;
   };
   const load = async () => {
-    const params = new URLSearchParams({ limit: 100 });
+    const params = new URLSearchParams({ limit: 500 });
     if (query.value.trim()) params.set('q', query.value.trim());
     if (kind.value) params.set('kind', kind.value);
     if (hypo.checked) params.set('include_hypotheses', 'true');
@@ -579,6 +597,21 @@ async function renderDocumentos(root) {
 }
 
 // ---- Integrações ----
+function credentialRow(label, kind, ready) {
+  const picker = h('input', { type: 'file', accept: '.json,application/json', class: 'hidden', 'aria-label': label, onchange: async () => {
+    if (!picker.files[0]) return;
+    const form = new FormData();
+    form.append('file', picker.files[0]);
+    const result = await act(() => api(`/credentials/${kind}`, { method: 'POST', body: form }));
+    picker.value = '';
+    if (!result) return;
+    if (result.check && !result.check.ok) feedback(`Chave instalada, mas o Firestore recusou: ${result.check.error || 'erro'}`, 'err');
+    else feedback(result.check ? 'Firebase conectado e testado.' : 'Credencial instalada.');
+    render();
+  } });
+  return row(h('div', { class: 'grow' }, label), badge(ready ? 'configurado' : 'pendente', ready ? 'ok' : 'warn'), picker, btn('Enviar arquivo', () => picker.click()));
+}
+
 async function renderIntegracoes(root) {
   const google = await api('/google/accounts');
   const groupsPt = { calendar: 'Agenda', gmail: 'Gmail', drive: 'Drive', photos: 'Fotos' };
@@ -594,6 +627,9 @@ async function renderIntegracoes(root) {
         if (r?.url) window.location.href = r.url;
       }, 'add', { disabled: !google.configured }), btn('Sincronizar agenda', () => act(() => api('/google/calendar/sync', { method: 'POST' }), (r) => `${r.created} novos, ${r.updated} atualizados, ${r.removed} removidos.`))),
     card('Armazenamento', h('div', { class: 'jarvis-chips' }, badge(`Backend: ${storage.backend}`), badge(`R2: ${storage.r2_configured ? 'configurado' : 'não configurado'}`, storage.r2_configured ? 'ok' : null), badge(`Classe A no mês: ${storage.usage.class_a}`), badge(`Classe B no mês: ${storage.usage.class_b}`)), sub('Limites gratuitos do R2: 1 milhão de operações classe A e 10 milhões de classe B por mês. O Jarvis para antes de ultrapassá-los.')),
+    card('Credenciais', sub('Envie aqui os arquivos JSON baixados do Google. Eles ficam só neste servidor, protegidos, e entram no backup criptografado.'),
+      credentialRow('Cliente OAuth do Google', 'google', google.configured),
+      credentialRow('Conta de serviço do Firebase', 'firebase', cfg.firebase.enabled)),
     card('Firebase (opcional)', h('div', { class: 'jarvis-chips' }, badge(cfg.firebase.enabled ? 'réplica ligada' : 'réplica desligada', cfg.firebase.enabled ? 'ok' : null), badge(`Pendentes: ${storage.replication.pending}`), storage.replication.stuck ? badge(`Com erro: ${storage.replication.stuck}`, 'err') : null), sub('O SQLite continua sendo a fonte da verdade. O Firestore recebe uma cópia, com o texto das memórias criptografado por padrão.')),
   );
 }
@@ -738,6 +774,182 @@ async function refreshAttention() {
   } catch { /* logged out or offline: try again on the next tick */ }
 }
 
+// ---- Modo conversa: falar e ouvir no próprio chat, com todas as ferramentas do agente ----
+const talk = { active: false, state: 'off', stream: null, ctx: null, audio: null, recognizer: null, waitingReply: false };
+const TALK_LABEL = { ouvindo: 'Ouvindo...', transcrevendo: 'Entendendo...', pensando: 'Pensando...', falando: 'Falando... (fale para interromper)' };
+
+function talkStatus(state, text) {
+  talk.state = state;
+  const pill = document.getElementById('jarvis-talk-status');
+  const button = document.getElementById('jarvis-talk-btn');
+  if (pill) {
+    pill.textContent = text || TALK_LABEL[state] || '';
+    pill.classList.toggle('hidden', !talk.active && !text);
+    document.getElementById('jarvis-talk-meter')?.classList.toggle('hidden', !talk.active);
+  }
+  button?.classList.toggle('jarvis-talk-on', talk.active);
+  button?.setAttribute('aria-pressed', String(talk.active));
+}
+
+function stopTalkAudio() {
+  if (talk.audio) { talk.audio.pause(); talk.audio = null; }
+  window.speechSynthesis?.cancel();
+}
+
+/** Text as it should be read aloud: no markdown, code or reasoning. */
+function speakable(text) {
+  return String(text || '')
+    .replace(/<think>[\s\S]*?<\/think>/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' Veja o código na tela. ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#*_>|~]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1500);
+}
+
+async function talkSpeak(text) {
+  const clean = speakable(text);
+  const backToListening = () => { if (talk.active) talkStatus('ouvindo'); };
+  if (!clean) { backToListening(); return; }
+  talkStatus('falando');
+  try {
+    const res = await fetch('/api/tts/synthesize', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: clean, format: 'audio' }) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const url = URL.createObjectURL(await res.blob());
+    stopTalkAudio();
+    talk.audio = new Audio(url);
+    talk.audio.addEventListener('ended', () => { URL.revokeObjectURL(url); talk.audio = null; backToListening(); });
+    talk.audio.addEventListener('error', backToListening);
+    await talk.audio.play();
+  } catch (err) {
+    console.warn('[jarvis] server voice unavailable, using the browser voice', err);
+    if (!window.speechSynthesis || !window.speechSynthesis.getVoices().length) {
+      talkStatus('ouvindo', 'Sem voz disponível: ative o Piper em Configurações > TTS.');
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'pt-BR';
+    utterance.onend = backToListening;
+    utterance.onerror = backToListening;
+    window.speechSynthesis.speak(utterance);
+  }
+}
+
+/** Puts the text in the normal chat composer and sends it, so tools, memory and history all apply. */
+function talkSend(text) {
+  const box = document.getElementById('message');
+  const form = document.getElementById('chat-form');
+  if (!box || !form) return;
+  box.value = text;
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  talk.waitingReply = true;
+  talkStatus('pensando');
+  form.requestSubmit();
+}
+
+async function talkSegment(blob) {
+  if (!talk.active || talk.state === 'pensando') return;
+  talkStatus('transcrevendo');
+  try {
+    const form = new FormData();
+    form.append('file', blob, 'fala.wav');
+    const res = await fetch('/api/stt/transcribe', { method: 'POST', credentials: 'same-origin', body: form });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const text = String(data.text || data.transcript || '').trim();
+    if (!text) { talkStatus('ouvindo'); return; }
+    talkSend(text);
+  } catch (err) {
+    talkStatus('ouvindo', `Não consegui transcrever (${err.message}). Continue falando.`);
+  }
+}
+
+async function startTalk() {
+  if (!window.isSecureContext || !navigator.mediaDevices) {
+    talkStatus('off', 'O microfone exige HTTPS ou localhost.');
+    return;
+  }
+  talk.active = true;
+  talkStatus('ouvindo');
+  let serverStt = false;
+  try { serverStt = (await api('/voice/status')).stt; } catch { /* use the browser below */ }
+  if (serverStt) {
+    try {
+      talk.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (err) {
+      talk.active = false;
+      talkStatus('off', err.name === 'NotAllowedError' ? 'Permita o microfone no navegador e tente de novo.' : `Microfone indisponível: ${err.name}`);
+      return;
+    }
+    talk.ctx = await createDetector(talk.stream, talkSegment, {
+      // While it talks only a clearly louder voice counts, so its own audio doesn't trigger it.
+      floorMultiplier: () => (talk.state === 'falando' ? 12 : talk.state === 'ouvindo' ? 3 : null),
+      onSpeech: () => { if (talk.state === 'falando') { stopTalkAudio(); talkStatus('ouvindo'); } },
+      onLevel: (energy) => {
+        const bar = document.getElementById('jarvis-talk-level');
+        if (bar) bar.style.width = `${Math.min(100, Math.round(Math.sqrt(energy) * 220))}%`;
+      },
+    });
+    return;
+  }
+  const recognizer = browserRecognizer((spoken) => { if (spoken.trim() && talk.state !== 'pensando') talkSend(spoken.trim()); }, { continuous: true });
+  if (!recognizer) {
+    talk.active = false;
+    talkStatus('off', 'Transcrição não configurada: ative o Whisper em Configurações > STT.');
+    return;
+  }
+  talk.recognizer = recognizer;
+  recognizer.onend = () => { if (talk.active && talk.recognizer === recognizer) recognizer.start(); };
+  recognizer.start();
+}
+
+function stopTalk() {
+  talk.active = false;
+  talk.waitingReply = false;
+  const recognizer = talk.recognizer;
+  talk.recognizer = null;
+  recognizer?.stop();
+  talk.ctx?.close().catch(() => {});
+  talk.stream?.getTracks().forEach((t) => t.stop());
+  talk.ctx = null;
+  talk.stream = null;
+  stopTalkAudio();
+  talkStatus('off');
+}
+
+function initConversationMode() {
+  const send = document.querySelector('.send-btn');
+  if (!send || document.getElementById('jarvis-talk-btn')) return;
+  const button = h('button', { type: 'button', id: 'jarvis-talk-btn', class: 'jarvis-talk-btn', title: 'Conversar por voz com o Jarvis', 'aria-label': 'Conversar por voz', 'aria-pressed': 'false', onclick: () => (talk.active ? stopTalk() : startTalk()) });
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '15');
+  svg.setAttribute('height', '15');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  for (const d of ['M4 10v4', 'M8 7v10', 'M12 4v16', 'M16 7v10', 'M20 10v4']) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  button.append(svg);
+  send.parentNode.insertBefore(button, send);
+  const pill = h('div', { id: 'jarvis-talk-status', class: 'jarvis-talk-status hidden', role: 'status', 'aria-live': 'polite' });
+  const meter = h('div', { class: 'jarvis-talk-meter hidden', id: 'jarvis-talk-meter', title: 'Nível do microfone. Se não mexer quando você fala, o navegador está usando outro microfone.' }, h('div', { id: 'jarvis-talk-level' }));
+  send.parentNode.insertBefore(meter, button);
+  send.parentNode.insertBefore(pill, meter);
+  document.addEventListener('jarvis:assistant-done', (event) => {
+    if (!talk.active || !talk.waitingReply) return;
+    talk.waitingReply = false;
+    talkSpeak(event.detail?.text);
+  });
+}
+
 /** Adds "Automático" to the chat's model picker. Choosing a model by hand turns it off. */
 async function initAutoRouting() {
   const menu = document.getElementById('model-picker-menu');
@@ -766,6 +978,7 @@ async function initAutoRouting() {
 
 export function initJarvis() {
   initAutoRouting();
+  initConversationMode();
   refreshAttention();
   setInterval(refreshAttention, 60000);
   const params = new URLSearchParams(window.location.search);
