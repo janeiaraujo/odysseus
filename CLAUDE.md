@@ -83,6 +83,8 @@ Grep for an existing tool such as `manage_notes` to see every place one appears.
 
 **Other entry points.** `scripts/odysseus-*` are CLIs that import `core` and `src` directly, sharing `scripts/_lib/cli.py`. `companion/` is the LAN pairing API. `integrations/` holds the Claude Code and Codex skill bundles. `services/hwfit/` provides the hardware-aware model recommendations for Cookbook.
 
+**J.A.R.V.I.S. layer.** `src/jarvis/` with `routes/jarvis_routes.py` and `static/js/jarvis.js` add the product on top of Odysseus, using a separate database (`data/jarvis/jarvis.db`). External and physical actions must go through `src/jarvis/policy.py`, whose risk classes live in code. `docs/architecture/overview.md` and `docs/implementation-status.md` hold the map and what has really been validated. Tests: `tests/jarvis/`.
+
 ## Security invariants
 
 `THREAT_MODEL.md` defines the trust boundary: admins may run shell commands by design, and the goal is to contain everyone and everything else.

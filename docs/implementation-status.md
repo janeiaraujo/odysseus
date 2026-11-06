@@ -28,7 +28,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | Fotos | 🧪 🚫 | Faltam credenciais; galeria na interface não implementada |
 | Cloudflare R2 | 🟡 🚫 | Testado contra servidor S3 real (moto); falta o R2 |
 | Objetos de zero byte | 🟡 | Testado contra S3 real; custo real no R2 não medido |
-| Firestore | 🟡 🚫 | Emulador oficial; falta `firebase login` e projeto |
+| Firestore | 🟡 | Projeto criado, regras negam acesso anônimo (403 real); código validado no emulador; **primeira gravação real pendente da chave** (`scripts/jarvis-firebase-check`) |
 | FCM | 🧪 🚫 | Implementado; não testado |
 | Home Assistant | 🧪 🚫 | Falta um servidor |
 | MQTT e ESP32 | 📋 | |
@@ -44,7 +44,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | 1 | Inicia preservando o ambiente | ✅ Com dados restaurados; stack atual intocada |
 | 2 | Memória sobrevive ao reinício | ✅ Aplicação real e ChromaDB real |
 | 3 | App conversa com o backend | 📋 Android adiado |
-| 4 | Modelo indisponível não derruba | ✅ Saúde preservada; falha contabilizada só em testes |
+| 4 | Modelo indisponível não derruba | ✅ Provedor derrubado de verdade: erro claro, saúde preservada |
 | 5 | Fallback respeita custo | 🧪 Testes do filtro; sem falha real de provedor |
 | 6 | Evento consultado corretamente | ✅ Tabelas reais e recorrência |
 | 7 | E-mail classificado sem envio | 🧪 |

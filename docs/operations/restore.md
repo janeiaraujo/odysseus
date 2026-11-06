@@ -18,6 +18,8 @@ python3 scripts/jarvis-doctor
 
 **Segurança:** o backup é verificado antes de tocar no destino. Um destino com dados recusa a operação; com `--force`, o conteúdo atual é movido para `data.pre-restore-<data>`, nunca sobrescrito.
 
+Chaves externas (como a do Firebase) voltam para `~/.config/jarvis`; escolha outro local com `--secrets-target`.
+
 **Depois de restaurar:** contas Google podem pedir reconexão, o que é esperado. Vetores são mesclados por ID em um ChromaDB existente.
 
 ## Recuperação de desastre

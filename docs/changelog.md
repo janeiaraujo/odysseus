@@ -18,3 +18,4 @@
 - Navegador com proteção contra SSRF.
 - Armazenamento local e R2, experimento de zero byte e réplica Firestore.
 - Backup criptografado e scripts de instalação, atualização e diagnóstico.
+- Diretório de segredos fora do repositório, montado somente leitura no container e incluído no backup criptografado.

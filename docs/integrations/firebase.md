@@ -1,6 +1,6 @@
 # Firebase
 
-**Estado: Firestore validado no emulador oficial. Não conectado a um projeto real, pois esta máquina não tem login no Firebase. FCM não testado.**
+**Estado: projeto criado e banco ativo, com acesso anônimo confirmado como negado. Código validado no emulador oficial. A primeira gravação real depende da chave chegar a este servidor. FCM não testado.**
 
 ## O que ele faz aqui
 
@@ -10,12 +10,19 @@ O caminho dos documentos usa um hash em vez do seu usuário, e o texto das memó
 
 ## Ativar
 
-1. Em [console.firebase.google.com](https://console.firebase.google.com), crie um projeto e ative o Firestore.
-2. Em *Contas de serviço*, gere uma chave e salve o JSON **fora do repositório**.
-3. No `.env`: `JARVIS_FIREBASE_CREDENTIALS=/caminho/chave.json` (montado no container).
-4. `PATCH /api/jarvis/config` com `{"firebase": {"enabled": true, "project_id": "seu-projeto"}}`.
+1. Em [console.firebase.google.com](https://console.firebase.google.com), crie um projeto no plano Spark e ative o Firestore em **modo de produção**. Backups do próprio Firestore exigem o plano pago Blaze; os do Jarvis os dispensam.
+2. Em *Configurações > Contas de serviço*, gere uma chave e guarde-a como `~/.config/jarvis/firebase-sa.json`, com `chmod 600`.
+3. Valide: `./venv/bin/python scripts/jarvis-firebase-check --project SEU_PROJETO`.
+4. No `.env`:
+   ```
+   JARVIS_SECRETS_DIR=/home/voce/.config/jarvis
+   JARVIS_FIREBASE_PROJECT=SEU_PROJETO
+   JARVIS_FIREBASE_CREDENTIALS=/app/secrets/firebase-sa.json
+   JARVIS_FIREBASE_ENABLED=true
+   ```
+5. Recrie o container. O diretório entra somente leitura em `/app/secrets`, e a chave vai no backup criptografado.
 
-Ative regras de segurança que neguem acesso público: a conta de serviço as ignora, e nenhum cliente precisa de acesso direto por enquanto.
+A localização do banco não pode ser alterada depois de criada. Revogue a chave em *Contas de serviço* se ela vazar.
 
 ## Testar com o emulador
 
