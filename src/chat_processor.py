@@ -192,6 +192,15 @@ class ChatProcessor:
         preface = []
         rag_sources = []
 
+        # Jarvis identity first. Static text, so the cached prefix is unaffected.
+        try:
+            from src.jarvis.persona import system_preface as _jarvis_preface
+            _persona = _jarvis_preface()
+            if _persona:
+                preface.append({"role": "system", "content": _persona})
+        except Exception as _e:
+            logger.debug(f"Jarvis persona unavailable: {_e}")
+
         # Add preset system prompt if specified
         if preset_system_prompt:
             preface.append({

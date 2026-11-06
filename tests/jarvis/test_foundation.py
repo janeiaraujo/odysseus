@@ -19,7 +19,7 @@ def test_jarvis_data_stays_out_of_the_odysseus_database(jarvis_env):
 def test_config_merges_defaults_and_persists():
     config.update_config({"router": {"profile": "local"}})
     assert config.get("router.profile") == "local"
-    assert config.get("router.allow_paid_fallback") is False
+    assert config.get("router.paid_fallback_mode") == "configured"
 
 
 @pytest.mark.parametrize("secret", [

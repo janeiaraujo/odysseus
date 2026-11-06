@@ -327,6 +327,17 @@ def _set_user_time_from_request(request: Request) -> None:
         pass
 
 
+def _jarvis_record_metrics(owner, url, model, metrics) -> None:
+    from src.jarvis.router import record_chat_metrics
+    record_chat_metrics(owner or "", url or "", model or "", metrics)
+
+
+def _jarvis_record_failure(owner, url, model, event) -> None:
+    from src.jarvis.router import record_usage
+    record_usage(owner=owner or "", url=url or "", model=model or "", ok=False,
+                 error=event.get("reason") or event.get("error") or "fallback")
+
+
 def setup_chat_routes(
     session_manager,
     chat_handler,
@@ -1064,6 +1075,9 @@ def setup_chat_routes(
                 _fallback_candidates = resolve_chat_fallback_candidates(owner=_user)
             except Exception:
                 _fallback_candidates = []
+            # Jarvis cost rules: a paid model is never reached without authorization.
+            from src.jarvis.router import filter_fallback_candidates as _jarvis_filter_fallbacks
+            _fallback_candidates = _jarvis_filter_fallbacks(_fallback_candidates, _user or "")
 
             # Send model name early so the frontend can show it during streaming
             _model_suffix = "Research" if effective_do_research else None
@@ -1148,6 +1162,7 @@ def setup_chat_routes(
                                         _stream_set(session, partial=full_response)
                                     yield chunk
                                 elif data.get("type") == "fallback":
+                                    _jarvis_record_failure(_user, sess.endpoint_url, _requested_model, data)
                                     # Selected model failed; a fallback answered.
                                     # Forward the notice and remember the real model.
                                     _answered_by = data.get("answered_by") or _answered_by
@@ -1205,6 +1220,7 @@ def setup_chat_routes(
                                 }
                                 yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
                             if full_response:
+                                _jarvis_record_metrics(_user, sess.endpoint_url, _requested_model, last_metrics)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
@@ -1318,6 +1334,7 @@ def setup_chat_routes(
                                         _agent_tool_calls += 1
                                     yield chunk
                                 elif data.get("type") == "fallback":
+                                    _jarvis_record_failure(_user, sess.endpoint_url, _requested_model, data)
                                     # Selected model failed; a fallback answered.
                                     # Forward the notice and remember the real
                                     # model so metrics reflect it, not the masked
@@ -1342,6 +1359,7 @@ def setup_chat_routes(
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
                             if full_response:
+                                _jarvis_record_metrics(_user, sess.endpoint_url, _requested_model, last_metrics)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,

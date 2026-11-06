@@ -15,8 +15,10 @@ DEFAULTS: Dict[str, Any] = {
     "persona": {"enabled": True, "name": "J.A.R.V.I.S.", "language": "pt-BR", "address_as": ""},
     "router": {
         "profile": "equilibrado",
-        "allow_paid_fallback": False,
-        "free_model_patterns": [":free$"],
+        # never = paid models never used as fallback; configured = only models the
+        # user listed in a fallback chain or the allowlist; always = router may pick any.
+        "paid_fallback_mode": "configured",
+        "free_model_patterns": [":free$", "^openrouter/free$"],
         "paid_model_allowlist": [],
         "rate_limit_rpm": {},
         "quality_overrides": {},
