@@ -378,6 +378,14 @@ async def _h_llm(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> str
     return await complete(owner, [{"role": "user", "content": str(params.get("prompt", ""))[:8000]}], purpose="mission")
 
 
+async def _h_backup(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    import asyncio
+    from src.jarvis import backup
+    result = await asyncio.to_thread(backup.run_configured)
+    return {k: result.get(k) for k in ("files", "size", "chroma_included", "env_included", "pruned", "uploaded_to_r2")}
+
+
+register("backup.create", _h_backup, policy.REVERSIBLE, description="Cria backup criptografado com retenção")
 register("agenda.brief", _h_brief, description="Resumo do dia: data, compromissos e pendencias")
 register("agenda.day", _h_agenda, description="Compromissos de um dia", params=("day",))
 register("notify", _h_notify, policy.REVERSIBLE, idempotent=False, description="Notifica o usuário; from_step usa o resultado de um passo", params=("title", "body", "from_step"))
@@ -389,3 +397,28 @@ register("calendar.sync", _h_calendar_sync, policy.REVERSIBLE, description="Sinc
 register("drive.sync", _h_drive_sync, policy.REVERSIBLE, description="Sincroniza pastas autorizadas do Drive")
 register("home.control", _h_home, policy.REVERSIBLE, idempotent=False, description="Aciona dispositivo; a política do dispositivo também se aplica", params=("entity_id", "op", "value"))
 register("llm.prompt", _h_llm, policy.REVERSIBLE, description="Pergunta a um modelo escolhido pelo roteador", params=("prompt",))
+
+
+def enable_recommended(owner: str) -> Dict[str, Any]:
+    """Create the routines that apply to this install. Idempotent: run it again after connecting something."""
+    from src.jarvis import backup
+    from src.jarvis.google.oauth import list_accounts
+
+    groups = {g for account in list_accounts(owner) if account["status"] == "connected" for g in account["groups"]}
+    wanted = [("Consolidar memória", "0 4 * * 0", [{"title": "Consolidar duplicatas", "handler": "memory.consolidate"}], True, "")]
+    wanted.append(("Backup criptografado", "0 3 * * *", [{"title": "Criar backup", "handler": "backup.create"}], bool(backup.configured_key()), "chave de backup não configurada"))
+    wanted.append(("Sincronizar agenda Google", "*/30 * * * *", [{"title": "Sincronizar agenda", "handler": "calendar.sync"}], "calendar" in groups, "agenda Google não conectada"))
+    wanted.append(("Triagem de e-mail", "*/15 * * * *", [{"title": "Classificar e-mails novos", "handler": "gmail.triage"}], "gmail" in groups, "Gmail não conectado"))
+    wanted.append(("Sincronizar Drive", "0 * * * *", [{"title": "Sincronizar pastas autorizadas", "handler": "drive.sync"}], "drive" in groups, "Drive não conectado"))
+    with session_scope() as db:
+        existing = {m.title for m in db.query(Mission.title).filter(Mission.owner == (owner or ""), Mission.status.in_(("active", "waiting_approval"))).all()}
+    created, present, skipped = [], [], []
+    for title, cron, steps, applies, why in wanted:
+        if title in existing:
+            present.append(title)
+        elif not applies:
+            skipped.append({"title": title, "reason": why})
+        else:
+            create(owner, title, steps, cron=cron)
+            created.append(title)
+    return {"created": created, "already_active": present, "skipped": skipped}

@@ -207,3 +207,39 @@ def test_no_secrets_mode_skips_secrets_dir(tmp_path, source):
     out, info = _backup(tmp_path, source, secrets_dir=secrets, include_secrets=False)
     target = tmp_path / "s2"
     assert backup.restore_backup(out, KEY, data_dir=tmp_path / "t", secrets_target=target)["secrets_restored"] == 0
+
+
+def test_run_configured_applies_retention_and_never_stores_recovery_key(tmp_path, source, monkeypatch):
+    from src.jarvis import config
+    data, env = source
+    secrets = tmp_path / "home" / ".config" / "jarvis"
+    secrets.mkdir(parents=True)
+    (secrets / "recovery.key").write_text(KEY)
+    (secrets / "firebase-sa.json").write_text("{}")
+    folder = tmp_path / "bk"
+    folder.mkdir()
+    for i in range(3):
+        old = folder / f"old{i}.jrvb"
+        old.write_text("x")
+        os.utime(old, (1000 + i, 1000 + i))
+    (folder / "nao-apagar.txt").write_text("y")
+    monkeypatch.setenv("JARVIS_BACKUP_KEY_FILE", str(secrets / "recovery.key"))
+    monkeypatch.setenv("JARVIS_BACKUP_DIR", str(folder))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("src.constants.DATA_DIR", str(data))
+    monkeypatch.delenv("JARVIS_R2_BUCKET", raising=False)
+    monkeypatch.chdir(env.parent)
+    config.update_config({"storage": {"retention": {"backups_keep_last": 2}}})
+    result = backup.run_configured()
+    assert result["env_included"] and sorted(result["pruned"]) == ["old0.jrvb", "old1.jrvb"]
+    assert (folder / "nao-apagar.txt").exists()
+    target = tmp_path / "restored"
+    restored = backup.restore_backup(result["path"], KEY, data_dir=tmp_path / "t", secrets_target=target, env_target=tmp_path / "t.env")
+    assert restored["env_restored"] and (target / "firebase-sa.json").exists() and not (target / "recovery.key").exists()
+
+
+def test_run_configured_without_key_is_clear(monkeypatch):
+    monkeypatch.delenv("JARVIS_BACKUP_KEY_FILE", raising=False)
+    monkeypatch.delenv("JARVIS_BACKUP_KEY", raising=False)
+    with pytest.raises(backup.BackupError, match="chave"):
+        backup.run_configured()

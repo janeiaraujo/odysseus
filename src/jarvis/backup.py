@@ -37,6 +37,7 @@ SKIP_TOP = {"fastembed_cache", "huggingface", "local", "cache", "tts_cache", "lo
 SECRET_FILES = {".app_key", "auth.json", "sessions.json", "vault.json"}
 TEMP_SUFFIXES = (".tmp", ".db-wal", ".db-shm", ".db-journal")
 MIN_PASSPHRASE = 12
+NEVER_BACKUP = {"recovery.key"}  # the key that opens the backup stays out of it
 _CHROMA_PAGE = 500
 
 
@@ -226,7 +227,7 @@ def create_backup(out_path: Path, passphrase: str, *, data_dir: Path, env_file: 
                 tar.add(env_file, arcname="env/.env", recursive=False)
             if include_secrets and secrets_dir and Path(secrets_dir).is_dir():
                 for path in sorted(Path(secrets_dir).iterdir()):
-                    if path.is_file() and not path.is_symlink():
+                    if path.is_file() and not path.is_symlink() and path.name not in NEVER_BACKUP:
                         arc = f"secrets/{path.name}"
                         files.append({"path": arc, "sha256": _sha256(path), "size": path.stat().st_size})
                         tar.add(path, arcname=arc, recursive=False)
@@ -393,3 +394,54 @@ def validate_restored(data_dir: Path) -> Dict[str, Any]:
             con.close()
     report["ok"] = not report["problems"] and report["app_db"]
     return report
+
+
+def configured_key() -> str:
+    key_file = os.environ.get("JARVIS_BACKUP_KEY_FILE", "")
+    if key_file and os.path.isfile(key_file):
+        return Path(key_file).read_text(encoding="utf-8").strip()
+    return os.environ.get("JARVIS_BACKUP_KEY", "")
+
+
+def backup_folder() -> Path:
+    return Path(os.environ.get("JARVIS_BACKUP_DIR") or Path.home() / "jarvis-backups")
+
+
+def prune_local(folder: Path, keep_last: int) -> List[str]:
+    """Delete only *.jrvb beyond the newest keep_last. Always keeps at least one."""
+    files = sorted(Path(folder).glob("*.jrvb"), key=lambda p: p.stat().st_mtime, reverse=True)
+    removed = []
+    for path in files[max(keep_last, 1):]:
+        path.unlink()
+        removed.append(path.name)
+    return removed
+
+
+def run_configured(include_secrets: bool = True) -> Dict[str, Any]:
+    """The whole backup as the running app sees it: data, env, secrets, vectors, retention, R2."""
+    from src.constants import DATA_DIR
+    from src.jarvis import config
+
+    key = configured_key()
+    if not key:
+        raise BackupError("chave de backup nao configurada (JARVIS_BACKUP_KEY_FILE)")
+    chroma = None
+    try:
+        from src.chroma_client import get_chroma_client
+        chroma = get_chroma_client()
+    except Exception as exc:
+        logger.warning("backup without ChromaDB: %s", type(exc).__name__)
+    secrets_dir = Path("/app/secrets") if Path("/app/secrets").is_dir() else Path.home() / ".config" / "jarvis"
+    env_file = next((p for p in (Path("/app/host.env"), Path(".env")) if p.is_file()), None)
+    folder = backup_folder()
+    target = folder / f"jarvis-{datetime.now():%Y%m%d-%H%M%S}.jrvb"
+    result = create_backup(target, key, data_dir=Path(DATA_DIR), env_file=env_file, include_secrets=include_secrets, chroma_client=chroma, secrets_dir=secrets_dir)
+    result.update({"chroma_included": chroma is not None, "env_included": bool(env_file and include_secrets)})
+    result["pruned"] = prune_local(folder, int(config.get("storage.retention.backups_keep_last", 14) or 14))
+    if os.environ.get("JARVIS_R2_BUCKET"):
+        from src.jarvis.storage import apply_retention, get_backend
+        backend = get_backend("r2")
+        backend.put_file(f"jarvis/backups/{target.name}", target)
+        result["uploaded_to_r2"] = True
+        result["r2_pruned"] = apply_retention(backend, "jarvis/backups/", int(config.get("storage.retention.backups_keep_last", 14) or 14))["removed"]
+    return result

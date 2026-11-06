@@ -119,8 +119,8 @@ def check_http():
 
 
 def check_backups():
-    folder = Path(os.environ.get("JARVIS_BACKUP_DIR", Path.home() / "jarvis-backups"))
-    files = sorted(folder.glob("*.jrvb"), key=lambda p: p.stat().st_mtime) if folder.is_dir() else []
+    folders = [Path(os.environ["JARVIS_BACKUP_DIR"])] if os.environ.get("JARVIS_BACKUP_DIR") else [Path.home() / "jarvis-backups", REPO / "backups"]
+    files = sorted((f for folder in folders if folder.is_dir() for f in folder.glob("*.jrvb")), key=lambda p: p.stat().st_mtime)
     if not files:
         yield WARN, "Backup", "nenhum backup criptografado; rode scripts/jarvis-backup create"
         return

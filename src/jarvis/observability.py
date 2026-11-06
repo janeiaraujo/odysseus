@@ -90,7 +90,8 @@ def _size(path: str) -> int:
 
 
 def backups() -> List[Dict[str, Any]]:
-    folder = Path(os.getenv("JARVIS_BACKUP_DIR", str(Path.home() / "jarvis-backups")))
+    from src.jarvis.backup import backup_folder
+    folder = backup_folder()
     if not folder.is_dir():
         return []
     try:
