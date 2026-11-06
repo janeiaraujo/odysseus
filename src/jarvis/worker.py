@@ -18,6 +18,13 @@ INTERVAL_SECONDS = 30
 _task: Optional[asyncio.Task] = None
 
 
+def _sync_memories() -> Dict[str, int]:
+    from src.constants import DATA_DIR
+    from src.jarvis import memory
+    from src.memory import MemoryManager
+    return memory.sync_from_odysseus(MemoryManager(DATA_DIR).load_all())
+
+
 async def run_once() -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for name, step in (("missions", missions.tick), ("mail", mailqueue.tick)):
@@ -26,6 +33,10 @@ async def run_once() -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("jarvis worker: %s failed: %s", name, redact_text(exc))
             out[name] = {"error": redact_text(exc)[:200]}
+    try:
+        out["memory_sync"] = await asyncio.to_thread(_sync_memories)
+    except Exception as exc:
+        logger.warning("jarvis worker: memory sync failed: %s", redact_text(exc))
     if config.get("firebase.enabled", False):
         try:
             out["replication"] = await replication.flush()
@@ -35,6 +46,11 @@ async def run_once() -> Dict[str, Any]:
 
 
 async def _loop() -> None:
+    try:
+        from src.jarvis import voice
+        logger.info("Jarvis voice models ready: %s", await asyncio.to_thread(voice.warm_up))
+    except Exception as exc:
+        logger.warning("voice warm-up failed: %s", redact_text(exc))
     while True:
         await run_once()
         await asyncio.sleep(INTERVAL_SECONDS)

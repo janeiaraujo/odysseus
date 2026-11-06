@@ -177,3 +177,20 @@ def test_invalid_input_rejected():
         memory.remember("   ")
     with pytest.raises(ValueError):
         memory.remember("x", kind="nope")
+
+
+def test_mirror_copies_everything_once_and_follows_deletes():
+    entries = [{"id": str(i), "text": f"Moro em lugar {i}", "owner": "ana", "category": "identity"} for i in range(40)]
+    assert memory.sync_from_odysseus(entries) == {"created": 40, "total": 40}
+    assert memory.sync_from_odysseus(entries) == {"created": 0, "total": 40}
+    assert memory.stats("ana")["by_status"] == {"fact": 40}  # import never invents conflicts
+    assert memory.delete_mirrored("0", owner="ana") is True
+    assert memory.delete_mirrored("0", owner="bob") is False
+    assert len(memory.list_items("ana")) == 39
+
+
+def test_core_identity_reaches_unrelated_questions():
+    memory.remember("Moro no Rio de Janeiro", owner="ana", category="identity")
+    memory.flush_index()
+    assert "Rio de Janeiro" in memory.context_for_chat("previsão do tempo para hoje", owner="ana")
+    assert memory.context_for_chat("previsão do tempo", owner="bob") == ""

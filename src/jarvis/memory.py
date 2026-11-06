@@ -207,7 +207,10 @@ def remember(text: str, *, owner: Optional[str] = "", kind: str = "semantic", ca
     digest, conflicts, created = content_hash(text), [], True
     with session_scope() as db:
         existing = _active(db.query(MemoryItem), owner).filter(MemoryItem.norm_hash == digest).first()
-        if existing is None:
+        # An import is what the user chose to keep: only exact repeats are merged,
+        # and comparing it against everything would flood them with false conflicts.
+        judged = source_type != "import"
+        if existing is None and judged:
             for row in _active(db.query(MemoryItem), owner).filter(MemoryItem.kind == kind).order_by(MemoryItem.updated_at.desc()).limit(500):
                 if similarity(row.text, text) >= DUPLICATE_THRESHOLD and not _contradicts(row.text, text):
                     existing = row
@@ -221,7 +224,7 @@ def remember(text: str, *, owner: Optional[str] = "", kind: str = "semantic", ca
             db.flush()
             return {"action": "duplicate", "item": to_dict(existing), "conflicts": []}
         rows = _active(db.query(MemoryItem), owner).filter(MemoryItem.kind == kind, MemoryItem.status.in_(("fact", "conflicted"))).limit(500).all()
-        contradicted = [r for r in rows if _contradicts(r.text, text)]
+        contradicted = [r for r in rows if _contradicts(r.text, text)] if judged else []
         row = MemoryItem(owner=owner, kind=kind, category=category, text=text, norm_hash=digest, source_type=source_type,
                          source_ref=redact_text(source_ref)[:300], trust=trust, status=status, confidence=confidence,
                          priority=priority, valid_until=valid_until)
@@ -239,8 +242,9 @@ def remember(text: str, *, owner: Optional[str] = "", kind: str = "semantic", ca
         item = to_dict(row)
     _fts_put(item["id"], text)
     _vector_add(item["id"], text)
-    audit.record("memory.remember", owner=owner, risk="reversible", target=item["id"], kind=kind, source=source_type,
-                 status=item["status"], conflicts=len(conflicts))
+    if judged:
+        audit.record("memory.remember", owner=owner, risk="reversible", target=item["id"], kind=kind, source=source_type,
+                     status=item["status"], conflicts=len(conflicts))
     _replicate(item, owner)
     return {"action": "conflict" if conflicts else "created", "item": item, "conflicts": conflicts}
 
@@ -393,11 +397,23 @@ def search(query: str, *, owner: Optional[str] = "", k: int = 8, kinds: Optional
         return [{**to_dict(r), "score": round(scores[r.id], 5)} for r in rows]
 
 
+def core_facts(owner: Optional[str] = "", limit: int = 12) -> List[Dict[str, Any]]:
+    """Who the user is: included in every answer, whatever the question. A question like
+    "previsão do tempo" shares no words with "moro no Rio", and search alone misses it."""
+    with session_scope() as db:
+        rows = (_active(db.query(MemoryItem), owner).filter(MemoryItem.category == "identity", MemoryItem.status.in_(("fact", "conflicted")))
+                .order_by(MemoryItem.priority.desc(), MemoryItem.created_at).limit(limit).all())
+        return [to_dict(r) for r in rows]
+
+
 def context_for_chat(message: str, owner: Optional[str] = "", limit: int = 6) -> str:
     """Compact block for the prompt. Caller must wrap it as untrusted context."""
-    items = search(message, owner=owner, k=limit, touch=True)
-    lines = []
+    items = core_facts(owner) + search(message, owner=owner, k=limit, touch=True)
+    lines, seen = [], set()
     for item in items:
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
         tag = "em conflito" if item["status"] == "conflicted" else item["kind"]
         lines.append(f"- [{tag}] {item['text']}")
     return "\n".join(lines)
@@ -475,3 +491,27 @@ def export_all(owner: Optional[str] = None) -> List[Dict[str, Any]]:
         if owner is not None:
             q = q.filter(MemoryItem.owner == owner)
         return [{**to_dict(r), "owner": r.owner} for r in q.all()]
+
+
+def sync_from_odysseus(entries: Iterable[Dict[str, Any]]) -> Dict[str, int]:
+    """Copy memories new in Odysseus's store. Jarvis stays complete if that file is rewritten."""
+    entries = list(entries or [])
+    with session_scope() as db:
+        known = {r[0] for r in db.query(MemoryItem.source_ref).filter(MemoryItem.source_ref.like("odysseus:%")).all()}
+    created = 0
+    for entry in entries:
+        if f"odysseus:{entry.get('id', '')}" in known or not str(entry.get("text") or "").strip():
+            continue
+        result = remember(str(entry["text"]).strip(), owner=str(entry.get("owner") or ""), category=str(entry.get("category") or "fact"),
+                          source_type="import", source_ref=f"odysseus:{entry.get('id', '')}")
+        created += result["action"] != "duplicate"
+    return {"created": created, "total": len(entries)}
+
+
+def delete_mirrored(odysseus_id: str, owner: Optional[str] = "") -> bool:
+    with session_scope() as db:
+        row = db.query(MemoryItem.id).filter(MemoryItem.source_ref == f"odysseus:{odysseus_id}", MemoryItem.owner == (owner or ""), MemoryItem.deleted_at.is_(None)).first()
+    if row is None:
+        return False
+    delete(row[0], owner=owner)
+    return True
