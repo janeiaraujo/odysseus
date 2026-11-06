@@ -203,3 +203,58 @@ def test_device_intent_reports_pending_approval_and_never_acts(devices):
 
 def test_device_of_another_owner_is_not_reachable(devices):
     assert home.parse_command("ligue a televisão da sala", "bob") is None
+
+
+# --- real Odysseus calendar tables (temp database, not the user's) -------------------
+
+@pytest.fixture
+def real_calendar(monkeypatch):
+    from tests.helpers.sqlite_db import make_temp_sqlite
+    import core.database as cdb
+    session_local, engine, tmp = make_temp_sqlite(cdb.Base)
+    monkeypatch.setattr(cdb, "SessionLocal", session_local)
+    yield session_local
+    engine.dispose()
+    os_remove = __import__("os").remove
+    try:
+        os_remove(tmp)
+    except OSError:
+        pass
+
+
+def _seed(session_local):
+    from core.database import CalendarCal, CalendarEvent
+    db = session_local()
+    db.add(CalendarCal(id="c-ana", owner="ana", name="Ana"))
+    db.add(CalendarCal(id="c-bob", owner="bob", name="Bob"))
+    db.add(CalendarEvent(uid="e1", calendar_id="c-ana", summary="Consulta", dtstart=datetime(2026, 11, 9, 13, 0), dtend=datetime(2026, 11, 9, 14, 0), is_utc=True, rrule=""))
+    db.add(CalendarEvent(uid="e2", calendar_id="c-ana", summary="Daily", dtstart=datetime(2026, 11, 2, 12, 0), dtend=datetime(2026, 11, 2, 12, 30), is_utc=True, rrule="FREQ=DAILY"))
+    db.add(CalendarEvent(uid="e3", calendar_id="c-bob", summary="Segredo do Bob", dtstart=datetime(2026, 11, 9, 13, 0), dtend=datetime(2026, 11, 9, 14, 0), is_utc=True, rrule=""))
+    db.commit()
+    db.close()
+
+
+def test_events_between_real_tables_owner_scoped_and_expands_recurrence(real_calendar):
+    _seed(real_calendar)
+    events = agenda.events_between("ana", at(9, 0), at(10, 0))
+    titles = [e["title"] for e in events]
+    assert "Consulta" in titles and "Daily" in titles and "Segredo do Bob" not in titles
+    consulta = next(e for e in events if e["title"] == "Consulta")
+    assert consulta["start"].hour == 10  # 13:00 UTC is 10:00 in Sao Paulo
+
+
+def test_google_sync_writes_real_tables_additively(real_calendar):
+    from core.database import CalendarEvent
+    from src.jarvis.google import calendar as gcal
+    _seed(real_calendar)
+    out = gcal._apply_local("ana", "acc1", "Google", [
+        {"id": "g1", "summary": "Voo", "status": "confirmed", "start": {"dateTime": "2026-11-09T15:00:00-03:00"}, "end": {"dateTime": "2026-11-09T16:00:00-03:00"}},
+        {"id": "g2", "summary": "Feriado", "status": "confirmed", "start": {"date": "2026-11-15"}, "end": {"date": "2026-11-16"}}])
+    assert out == {"created": 2, "updated": 0, "removed": 0}
+    titles = [e["title"] for e in agenda.events_between("ana", at(9, 0), at(10, 0))]
+    assert "Voo" in titles and "Consulta" in titles
+    assert gcal._apply_local("ana", "acc1", "Google", [{"id": "g1", "status": "cancelled"}])["removed"] == 1
+    db = real_calendar()
+    assert db.get(CalendarEvent, "e1") is not None and db.get(CalendarEvent, "gcal:acc1:g1") is None
+    assert db.get(CalendarEvent, "gcal:acc1:g2").origin == "google"
+    db.close()
