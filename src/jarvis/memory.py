@@ -397,7 +397,7 @@ def search(query: str, *, owner: Optional[str] = "", k: int = 8, kinds: Optional
         return [{**to_dict(r), "score": round(scores[r.id], 5)} for r in rows]
 
 
-def core_facts(owner: Optional[str] = "", limit: int = 12) -> List[Dict[str, Any]]:
+def core_facts(owner: Optional[str] = "", limit: int = 30) -> List[Dict[str, Any]]:
     """Who the user is: included in every answer, whatever the question. A question like
     "previsão do tempo" shares no words with "moro no Rio", and search alone misses it."""
     with session_scope() as db:

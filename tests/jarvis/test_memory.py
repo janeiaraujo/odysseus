@@ -194,3 +194,12 @@ def test_core_identity_reaches_unrelated_questions():
     memory.flush_index()
     assert "Rio de Janeiro" in memory.context_for_chat("previsão do tempo para hoje", owner="ana")
     assert memory.context_for_chat("previsão do tempo", owner="bob") == ""
+
+
+def test_every_identity_fact_reaches_chat_even_with_many_of_them():
+    """The live install has 20 identity facts and only one says where the user lives."""
+    for i in range(20):
+        memory.remember(f"Fato de identidade número {i}", owner="ana", category="identity")
+    memory.remember("Moro no Rio de Janeiro", owner="ana", category="identity")
+    memory.flush_index()
+    assert "Rio de Janeiro" in memory.context_for_chat("previsão do tempo para hoje", owner="ana")
