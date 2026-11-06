@@ -5,10 +5,21 @@ import os
 import time
 import uuid
 import re
+import threading
+from contextlib import contextmanager
 from typing import List, Dict, Tuple
 from datetime import datetime
 
+try:
+    import fcntl
+except ImportError:  # Windows native runs: the in-process lock still applies
+    fcntl = None
+
 logger = logging.getLogger(__name__)
+
+_WRITE_LOCK = threading.RLock()
+_LOCK_STATE = threading.local()
+_HISTORY_KEEP = 30
 
 def tokenize(text: str) -> List[str]:
     """Simple tokenizer that splits on whitespace and removes punctuation."""
@@ -34,6 +45,7 @@ def get_text_similarity(text1: str, text2: str) -> float:
 
 class MemoryManager:
     def __init__(self, data_dir: str):
+        self._seen = threading.local()
         self.memory_file = os.path.join(data_dir, "memory.json")
         self.ensure_file_exists()
         
@@ -110,11 +122,9 @@ class MemoryManager:
             with open(self.memory_file, 'w', encoding='utf-8') as f:
                 json.dump([], f, ensure_ascii=False, indent=2)
     
-    def load_all(self) -> List[Dict]:
-        """Load all memory entries from JSON file (unfiltered)."""
+    def _read_disk(self) -> List[Dict]:
         if not os.path.exists(self.memory_file):
             return []
-
         try:
             with open(self.memory_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -123,8 +133,15 @@ class MemoryManager:
         except (json.JSONDecodeError, PermissionError) as e:
             logger.error("Error loading memory.json: %s", e)
             return self._migrate_from_legacy()
-
         return []
+
+    def load_all(self) -> List[Dict]:
+        """Load all memory entries from JSON file (unfiltered)."""
+        entries = self._read_disk()
+        # Remember what this caller saw, so save() can tell its deletions apart
+        # from entries somebody else added in the meantime.
+        self._seen.ids = {e.get("id") for e in entries}
+        return entries
 
     def load(self, owner: str = None) -> List[Dict]:
         """Load memory entries, optionally filtered by owner."""
@@ -193,8 +210,52 @@ class MemoryManager:
             logger.error("Failed to convert legacy memory: %s", e)
             return []
     
+    @contextmanager
+    def _exclusive(self):
+        """Serialize writers across threads and processes (web app, CLIs, tasks).
+
+        Reentrant: add_many holds it while calling save. Only the outermost level
+        takes the file lock, because a second flock in the same process would block
+        on the first and hang forever.
+        """
+        with _WRITE_LOCK:
+            depth = getattr(_LOCK_STATE, "depth", 0)
+            _LOCK_STATE.depth = depth + 1
+            try:
+                if depth or not fcntl:
+                    yield
+                    return
+                os.makedirs(os.path.dirname(self.memory_file) or ".", exist_ok=True)
+                with open(self.memory_file + ".lock", "w", encoding="utf-8") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(lock, fcntl.LOCK_UN)
+            finally:
+                _LOCK_STATE.depth = depth
+
+    def _keep_history(self, entries: List[Dict]) -> None:
+        """Before anything shrinks the file, keep a copy. Deletions must be recoverable."""
+        try:
+            folder = os.path.join(os.path.dirname(self.memory_file), "memory_history")
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, f"memory-{time.time_ns()}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False)
+            for old in sorted(os.listdir(folder))[:-_HISTORY_KEEP]:
+                os.unlink(os.path.join(folder, old))
+        except OSError as e:
+            logger.warning("Could not keep memory history: %s", e)
+
     def save(self, entries: List[Dict]):
-        """Save memory entries to JSON file."""
+        """Save memory entries to JSON file.
+
+        A slow caller (an AI tidy waits tens of seconds for a model) holds a stale
+        copy, and writing it back used to erase everything added meanwhile: importing
+        130 memories could leave a handful. So this merges: entries on disk that the
+        caller never saw are kept. Only what the caller saw and removed is deleted.
+        """
         # Validate entries before saving
         for entry in entries:
             if "id" not in entry:
@@ -205,13 +266,47 @@ class MemoryManager:
                 entry["source"] = "user"
             if "category" not in entry:
                 entry["category"] = "fact"
-        
-        # Use atomic write
-        tmp_file = self.memory_file + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_file, self.memory_file)
-    
+
+        with self._exclusive():
+            disk = self._read_disk()
+            seen = getattr(self._seen, "ids", None)
+            if seen is not None:
+                given = {e.get("id") for e in entries}
+                added_meanwhile = [e for e in disk if e.get("id") not in seen and e.get("id") not in given]
+                if added_meanwhile:
+                    logger.info("Keeping %d memories added during this write", len(added_meanwhile))
+                    entries = list(entries) + added_meanwhile
+            if len(entries) < len(disk):
+                self._keep_history(disk)
+            # Use atomic write
+            tmp_file = f"{self.memory_file}.{os.getpid()}.{threading.get_ident()}.tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(entries, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, self.memory_file)
+            self._seen.ids = {e.get("id") for e in entries}
+
+    @staticmethod
+    def _dedupe_key(text: str) -> str:
+        return " ".join((text or "").lower().split())
+
+    def add_many(self, items: List[Dict], owner: str = None, source: str = "import") -> Dict:
+        """Add many memories in one write. Only exact repeats are skipped: nothing is
+        judged redundant on the user's behalf. Returns the created entries."""
+        with self._exclusive():
+            entries = self.load_all()
+            known = {self._dedupe_key(e.get("text")) for e in entries if e.get("owner") == owner or (not owner and not e.get("owner"))}
+            created = []
+            for item in items:
+                text = str(item.get("text") or "").strip()
+                key = self._dedupe_key(text)
+                if not key or key in known:
+                    continue
+                known.add(key)
+                created.append(self.add_entry(text, source, str(item.get("category") or "fact"), owner=owner))
+            if created:
+                self.save(entries + created)
+        return {"created": created, "duplicates": len(items) - len(created)}
+
     def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
         """Add a new memory entry."""
         if not text.strip():

@@ -35,6 +35,71 @@ from src.upload_limits import read_upload_limited, MEMORY_IMPORT_MAX_BYTES
 logger = logging.getLogger(__name__)
 
 
+IMPORT_CHUNK_CHARS = 12000
+IMPORT_MAX_CHUNKS = 25
+_LIST_MARKER = re.compile(r"^\s*(?:[-*\u2022\u2013]\s+|\d{1,5}[.)]\s+)")
+
+
+def _clean_import_line(line: str) -> str:
+    return _strip_list_prefix(_LIST_MARKER.sub("", line).strip())
+
+
+def _parse_memory_list(text: str, ext: str) -> list:
+    """Items if this file already is a list of memories, else []."""
+    if ext == ".json":
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            parsed = next((parsed[k] for k in ("memories", "memory", "items", "data", "entries") if isinstance(parsed.get(k), list)), None)
+        if not isinstance(parsed, list):
+            return []
+        out = []
+        for item in parsed:
+            if isinstance(item, dict):
+                value = item.get("text") or item.get("content") or item.get("memory") or item.get("value")
+                if value:
+                    out.append({"text": _strip_list_prefix(str(value)), "category": item.get("category") or "fact"})
+            elif isinstance(item, str) and item.strip():
+                out.append({"text": _strip_list_prefix(item.strip()), "category": "fact"})
+        return out
+    if ext == ".csv":
+        import csv
+        import io
+        rows = list(csv.DictReader(io.StringIO(text)))
+        if rows and rows[0] and any((k or "").strip().lower() in ("text", "memory", "memoria", "memória", "content") for k in rows[0]):
+            column = next(k for k in rows[0] if (k or "").strip().lower() in ("text", "memory", "memoria", "memória", "content"))
+            return [{"text": r[column].strip(), "category": (r.get("category") or "fact").strip() or "fact"} for r in rows if (r.get(column) or "").strip()]
+    if ext in (".txt", ".md", ".csv", ".log"):
+        lines = [l for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+        if len(lines) >= 3:
+            marked = sum(1 for l in lines if _LIST_MARKER.match(l))
+            short = sum(1 for l in lines if len(l) <= 600)
+            # A list: mostly bullets, or one short statement per line. Prose paragraphs aren't.
+            if marked / len(lines) >= 0.6 or (len(lines) >= 5 and short / len(lines) >= 0.9):
+                return [{"text": _clean_import_line(l), "category": "fact"} for l in lines if _clean_import_line(l)]
+    return []
+
+
+def _parse_extraction(raw: str) -> list:
+    """A model's answer to the extraction prompt, tolerating fences and plain lists."""
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return [{"text": _strip_list_prefix(l.strip()), "category": "fact"} for l in raw.splitlines() if len(l.strip()) > 5]
+    out = []
+    for item in parsed if isinstance(parsed, list) else []:
+        if isinstance(item, dict) and item.get("text"):
+            out.append({"text": _strip_list_prefix(str(item["text"])), "category": item.get("category") or "fact"})
+        elif isinstance(item, str) and item.strip():
+            out.append({"text": _strip_list_prefix(item.strip()), "category": "fact"})
+    return out
+
+
 def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionManager, memory_vector=None):
     """Set up memory-related routes."""
     router = APIRouter(prefix="/api/memory", tags=["memory"])
@@ -389,37 +454,14 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         if not text.strip():
             return {"suggestions": [], "message": "No readable content found"}
 
-        # Fast path: a .json upload that already looks like a memories export
-        # (list of {text, category, ...} dicts, or list of strings) round-trips
-        # directly without spending an LLM call to re-extract its own output.
-        # Without this, re-importing a memories.json from another account
-        # ran the file through the extractor, which often re-emitted the
-        # entries as a numbered list (and the numbering leaked into the
-        # `text` field).
-        if ext == ".json":
-            try:
-                parsed = json.loads(text)
-            except json.JSONDecodeError:
-                parsed = None
-            if isinstance(parsed, list) and parsed:
-                direct = []
-                for item in parsed:
-                    if isinstance(item, dict) and item.get("text"):
-                        direct.append({
-                            "text": _strip_list_prefix(str(item["text"])),
-                            "category": item.get("category") or "fact",
-                        })
-                    elif isinstance(item, str) and item.strip():
-                        direct.append({
-                            "text": _strip_list_prefix(item.strip()),
-                            "category": "fact",
-                        })
-                if direct:
-                    return {"suggestions": direct, "filename": filename}
+        # A file that already is a list of memories is imported as written. A model
+        # would summarize it, and the size limits below would silently drop entries.
+        direct = _parse_memory_list(text, ext)
+        if direct:
+            return {"suggestions": direct, "filename": filename}
 
-        # Truncate very long documents
-        if len(text) > 15000:
-            text = text[:15000] + "\n[Truncated]"
+        # Free-form documents go to a model in pieces, so length doesn't lose content.
+        chunks = [text[i:i + IMPORT_CHUNK_CHARS] for i in range(0, len(text), IMPORT_CHUNK_CHARS)][:IMPORT_MAX_CHUNKS]
 
         # Send to LLM for memory extraction
         import_prompt = (
@@ -437,64 +479,55 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
             "Return ONLY valid JSON, no markdown fences."
         )
 
-        try:
-            raw = await llm_call_async(
-                endpoint_url,
-                model,
-                [
-                    {"role": "system", "content": import_prompt},
-                    {"role": "user", "content": f"Document: {filename}\n\n{text}"},
-                ],
-                temperature=0.2,
-                max_tokens=2000,
-                headers=headers,
-            )
+        suggestions: list = []
+        seen_texts: set = set()
+        failures = 0
+        for index, chunk in enumerate(chunks):
+            try:
+                raw = await llm_call_async(
+                    endpoint_url,
+                    model,
+                    [
+                        {"role": "system", "content": import_prompt},
+                        {"role": "user", "content": f"Document: {filename} (part {index + 1} of {len(chunks)})\n\n{chunk}"},
+                    ],
+                    temperature=0.2,
+                    max_tokens=4000,
+                    headers=headers,
+                )
+            except Exception as e:
+                logger.error(f"Memory import extraction failed on part {index + 1}: {e}")
+                failures += 1
+                continue
+            for item in _parse_extraction(raw):
+                key = " ".join(item["text"].lower().split())
+                if key and key not in seen_texts:
+                    seen_texts.add(key)
+                    suggestions.append(item)
+        if failures == len(chunks):
+            raise HTTPException(502, "LLM extraction failed")
+        return {"suggestions": suggestions, "filename": filename, "failed_parts": failures, "total_parts": len(chunks)}
 
-            # Parse JSON
-            raw = raw.strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-            suggestions = json.loads(raw)
-            if isinstance(suggestions, list):
-                normalized = []
-                for s in suggestions:
-                    if not s:
-                        continue
-                    if isinstance(s, dict):
-                        s = dict(s)
-                        if s.get("text"):
-                            s["text"] = _strip_list_prefix(str(s["text"]))
-                        normalized.append(s)
-                    else:
-                        normalized.append({"text": _strip_list_prefix(str(s)), "category": "fact"})
-                suggestions = normalized
-            else:
-                suggestions = []
-
-            return {"suggestions": suggestions, "filename": filename}
-
-        except json.JSONDecodeError:
-            # Fallback: split by lines, stripping any "1.", "2)" markdown-list
-            # numbering the model added so saved memories don't keep the prefix.
-            lines = [_strip_list_prefix(l.strip()) for l in raw.splitlines() if l.strip() and len(l.strip()) > 5]
-            return {"suggestions": [{"text": l, "category": "fact"} for l in lines[:20]], "filename": filename}
-        except Exception as e:
-            logger.error(f"Memory import extraction failed: {e}")
-            raise HTTPException(502, f"LLM extraction failed: {str(e)}")
-
-    @router.post("/{memory_id}/pin")
-    def pin_memory(request: Request, memory_id: str, pinned: bool = Form(True)):
-        """Pin or unpin a memory. Pinned memories are always included in context."""
+    @router.post("/add-bulk")
+    async def add_memories_bulk(request: Request):
+        """Save a whole import at once. One write and one event, however many items."""
+        from src.auth_helpers import require_privilege
+        require_privilege(request, "can_manage_memory")
+        body = await request.json()
+        items = body.get("items") if isinstance(body, dict) else None
+        if not isinstance(items, list) or len(items) > 20000:
+            raise HTTPException(400, "items must be a list of up to 20000 entries")
         user = _owner(request)
-        all_mem = memory_manager.load_all()
-        for i, memory in enumerate(all_mem):
-            if memory["id"] == memory_id:
-                _verify_memory_owner(memory, user)
-                all_mem[i]["pinned"] = pinned
-                memory_manager.save(all_mem)
-                return {"ok": True, "pinned": pinned}
-        raise HTTPException(404, f"Memory item {memory_id} not found")
+        clean = [i for i in items if isinstance(i, dict)]
+        result = memory_manager.add_many(clean, owner=user, source=str(body.get("source") or "import"))
+        created = result["created"]
+        if created and memory_vector and memory_vector.healthy:
+            def _index() -> None:
+                for entry in created:
+                    memory_vector.add(entry["id"], entry["text"])
+            import threading
+            threading.Thread(target=_index, name="memory-import-index", daemon=True).start()
+        return {"ok": True, "created": len(created), "duplicates": result["duplicates"], "count": len(memory_manager.load(owner=user))}
 
     # Wildcard routes MUST come last — otherwise they swallow /import, /search, etc.
     @router.get("/{memory_id}")
@@ -547,6 +580,12 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         # Sync vector index
         if memory_vector and memory_vector.healthy:
             memory_vector.remove(memory_id)
+        # The same memory in Jarvis goes too: deleting one must delete it everywhere.
+        try:
+            from src.jarvis.memory import delete_mirrored
+            delete_mirrored(memory_id, owner=user or "")
+        except Exception as exc:
+            logger.warning("Jarvis memory mirror not updated: %s", exc)
         return {"ok": True, "message": "Memory deleted successfully"}
 
     return router

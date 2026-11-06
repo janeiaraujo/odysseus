@@ -233,8 +233,12 @@ async def action_consolidate_memory(owner: str, **kwargs) -> Tuple[str, bool]:
                 logger.warning("AI memory tidy failed; falling back to duplicate cleanup: %s", ai_err)
             return False
 
+        # A model deciding what to delete destroyed real memories (it fired every 5
+        # additions). Opt-in now; by default this only removes exact duplicates.
+        from src.settings import get_setting
+        _ai_tidy = bool(get_setting("memory_ai_tidy", False))
         for group_owner, group_memories in memory_groups.items():
-            if await _try_ai_tidy_group(group_owner, group_memories):
+            if _ai_tidy and await _try_ai_tidy_group(group_owner, group_memories):
                 continue
 
             seen = {}

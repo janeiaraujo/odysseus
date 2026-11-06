@@ -34,6 +34,7 @@ def test_omitted_memory_survives_only_explicit_drop(monkeypatch):
 
     _FakeMM.saved = None
     monkeypatch.setattr(src.memory, "MemoryManager", _FakeMM)
+    monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: True if key == "memory_ai_tidy" else default)  # opt-in path
     monkeypatch.setattr(
         src.task_endpoint, "resolve_task_candidates",
         lambda owner=None: [("http://x/v1", "model", {})],

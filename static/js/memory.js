@@ -1342,24 +1342,31 @@ async function handleImportFile(file) {
       saveAllBtn.className = 'memory-item-btn save';
       saveAllBtn.textContent = 'save all';
       saveAllBtn.addEventListener('click', async () => {
+        // One request for the whole import: saving one by one was slow and fragile.
+        const items = reviewItems.filter((s) => s.active && s.text).map((s) => ({ text: s.text, category: s.category }));
+        saveAllBtn.disabled = true;
+        saveAllBtn.textContent = 'saving...';
         let saved = 0;
-        for (const s of reviewItems) {
-          if (!s.active || !s.text) continue;
-          try {
-            await fetch(`${window.location.origin}/api/memory/add`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: s.text, category: s.category })
-            });
-            saved++;
-          } catch (e) { /* skip */ }
+        try {
+          const res = await fetch(`${window.location.origin}/api/memory/add-bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          saved = (await res.json()).created;
+        } catch (e) {
+          saveAllBtn.disabled = false;
+          saveAllBtn.textContent = 'save all';
+          showError(`Não foi possível salvar: ${e.message}`);
+          return;
         }
         body.classList.add('hidden');
         body.innerHTML = '';
         if (memList) memList.classList.remove('hidden');
         await loadMemories();
         document.querySelector('.memory-tab[data-memory-tab="browse"]')?.click();
-        showToast(`Saved ${saved} memories`);
+        showToast(`${saved} memórias salvas`);
       });
       headerActions.appendChild(saveAllBtn);
       headerActions.appendChild(backBtn);

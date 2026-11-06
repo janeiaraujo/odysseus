@@ -32,6 +32,7 @@ async def test_consolidate_memory_empty_owner_treats_each_owner_separately(monke
     from src import llm_core
     from src import task_endpoint
     action_consolidate_memory = _import_consolidate_action()
+    monkeypatch.setattr("src.settings.get_setting", lambda key, default=None: True if key == "memory_ai_tidy" else default)  # opt-in path
 
     long_alice_text = "Alice private project context. " + ("A" * 2200)
     data_dir = _write_memories(
