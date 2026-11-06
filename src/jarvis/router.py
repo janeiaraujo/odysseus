@@ -331,6 +331,38 @@ def select(**kwargs: Any) -> Optional[ModelInfo]:
     return ranked[0] if ranked else None
 
 
+def auto_chat_enabled(owner: Optional[str]) -> bool:
+    return bool((config.get("router.auto_chat", {}) or {}).get(owner or "default"))
+
+
+def set_auto_chat(owner: Optional[str], enabled: bool) -> None:
+    current = dict(config.get("router.auto_chat", {}) or {})
+    current[owner or "default"] = bool(enabled)
+    config.update_config({"router": {"auto_chat": current}})
+
+
+def route_turn(owner: Optional[str]) -> List[Tuple[str, str, Dict]]:
+    """Best targets for this chat turn when automatic mode is on: [chosen, *alternatives].
+
+    Empty when it's off or nothing qualifies, and then the session's own model is used.
+    """
+    if not auto_chat_enabled(owner):
+        return []
+    from src.endpoint_resolver import resolve_endpoint_by_id
+    targets: List[Tuple[str, str, Dict]] = []
+    try:
+        for model in rank(owner=owner or ""):
+            target = resolve_endpoint_by_id(model.endpoint_id, model.model, owner=owner or None)
+            if target:
+                targets.append(target)
+            if len(targets) >= 4:
+                break
+    except Exception as exc:
+        logger.warning("[jarvis.router] automatic routing unavailable: %s", redact_text(exc))
+        return []
+    return targets
+
+
 def _cost(model: str, input_tokens: int, output_tokens: int) -> Optional[float]:
     price = (config.get("pricing", {}) or {}).get(model)
     if not isinstance(price, dict):

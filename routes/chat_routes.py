@@ -492,6 +492,7 @@ def setup_chat_routes(
 
         _set_user_time_from_request(request)
 
+        _jarvis_route_alternatives = []
         form_data = await request.form()
         message = form_data.get("message")
         session = form_data.get("session")
@@ -627,6 +628,14 @@ def setup_chat_routes(
             _verify_session_owner(request, session)
             sess = session_manager.get_session(session)
             owner = effective_user(request)
+            # Jarvis automatic mode. Attachments keep the session's model, since
+            # it may have been chosen for what they need (vision, for instance).
+            if not compare_mode and not attachments:
+                from src.jarvis.router import route_turn as _jarvis_route_turn
+                _jarvis_routed = _jarvis_route_turn(owner or "")
+                if _jarvis_routed:
+                    sess.endpoint_url, sess.model, sess.headers = _jarvis_routed[0]
+                    _jarvis_route_alternatives = _jarvis_routed[1:]
             if _clear_orphaned_session_endpoint(sess, owner=owner):
                 raise HTTPException(400, "Selected model endpoint was removed. Pick another model in Settings.")
             # Issue #587: picker shows a model from the endpoint cache but
@@ -1089,7 +1098,7 @@ def setup_chat_routes(
                 _fallback_candidates = []
             # Jarvis cost rules: a paid model is never reached without authorization.
             from src.jarvis.router import filter_fallback_candidates as _jarvis_filter_fallbacks
-            _fallback_candidates = _jarvis_filter_fallbacks(_fallback_candidates, _user or "")
+            _fallback_candidates = _jarvis_route_alternatives + _jarvis_filter_fallbacks(_fallback_candidates, _user or "")
 
             # Send model name early so the frontend can show it during streaming
             _model_suffix = "Research" if effective_do_research else None
