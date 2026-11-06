@@ -187,3 +187,11 @@ def test_direct_shortcut_is_unchanged_with_persona_disabled():
 
 def test_direct_shortcut_handles_missing_history():
     assert persona.direct_reply_messages([], "oi")[-1] == {"role": "user", "content": "oi"}
+
+
+def test_paid_proxy_on_private_ip_is_not_treated_as_local(monkeypatch):
+    monkeypatch.setattr(router, "_configured_chain", lambda owner: set())
+    monkeypatch.setattr(router, "_load_endpoints", lambda owner: [SimpleNamespace(base_url="http://10.0.0.5:4000/v1", endpoint_kind="api")])
+    assert router.filter_fallback_candidates([("http://10.0.0.5:4000/v1/chat/completions", "gpt-5", {})]) == []
+    monkeypatch.setattr(router, "_load_endpoints", lambda owner: [])
+    assert len(router.filter_fallback_candidates([("http://10.0.0.5:4000/v1/chat/completions", "llama", {})])) == 1

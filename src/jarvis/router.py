@@ -223,14 +223,28 @@ def paid_allowed(model: str, owner: Optional[str] = "", chain: Optional[Set[str]
     return False, "modelo pago sem autorização"
 
 
+def _endpoint_kinds(owner: Optional[str]) -> Dict[str, str]:
+    """host:port -> endpoint_kind, so a paid proxy on a private IP isn't mistaken for local."""
+    kinds: Dict[str, str] = {}
+    for ep in _load_endpoints(owner):
+        parsed = urlparse(ep.base_url or "")
+        kinds[parsed.netloc.lower()] = (getattr(ep, "endpoint_kind", None) or "auto").lower()
+    return kinds
+
+
 def filter_fallback_candidates(candidates: Sequence[Tuple[str, str, Dict]], owner: Optional[str] = "") -> List[Tuple[str, str, Dict]]:
     """Drop chat fallbacks the cost rules forbid. Fails closed for paid models on error."""
     chain = _configured_chain(owner)
     kept = []
+    kinds: Dict[str, str] = {}
+    try:
+        kinds = _endpoint_kinds(owner)
+    except Exception as exc:  # treated as "auto": a private address counts as local
+        logger.warning("[jarvis.router] endpoint kinds unavailable: %s", redact_text(exc))
     for candidate in candidates or []:
         url, model = candidate[0], candidate[1]
         try:
-            if tier_for(url, model) == PAID:
+            if tier_for(url, model, kinds.get(urlparse(url).netloc.lower())) == PAID:
                 ok, why = paid_allowed(model, owner, chain)
                 if not ok:
                     logger.info("[jarvis.router] fallback bloqueado: %s (%s)", model, why)
