@@ -54,6 +54,12 @@ SKILLS_DIR = os.path.join(DATA_DIR, "skills")
 GALLERY_DIR = os.path.join(DATA_DIR, "gallery")
 GALLERY_UPLOADS_DIR = os.path.join(DATA_DIR, "gallery_uploads")
 MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
+JARVIS_DIR = os.path.join(DATA_DIR, "jarvis")
+JARVIS_DB = os.path.join(JARVIS_DIR, "jarvis.db")
+JARVIS_CONFIG_FILE = os.path.join(JARVIS_DIR, "config.json")
+JARVIS_DATASETS_DIR = os.path.join(JARVIS_DIR, "datasets")
+JARVIS_OBJECTS_DIR = os.path.join(JARVIS_DIR, "objects")
+JARVIS_BROWSER_DIR = os.path.join(JARVIS_DIR, "browser")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))
