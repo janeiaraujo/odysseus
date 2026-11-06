@@ -145,7 +145,7 @@ async def index_allowed(owner: str, account_id: Optional[str] = None) -> Dict[st
     stats = {"indexed": 0, "unchanged": 0, "skipped": 0, "errors": 0}
     if not folders:
         return stats
-    start = _check(await google_request("GET", f"{API}/changes/startPageToken", account_id=account_id, owner=owner), "ler token de mudancas").get("startPageToken", "")
+    start = _check(await google_request("GET", f"{API}/changes/startPageToken", account_id=account_id, owner=owner), "ler token de mudanças").get("startPageToken", "")
     for folder in folders:
         for file in await list_files(owner, folder_id=folder, page_size=200, account_id=account_id):
             await _index_one(owner, file, account_id, stats)
@@ -182,7 +182,7 @@ async def sync_changes(owner: str, account_id: Optional[str] = None) -> Dict[str
     allowed = set(allowed_folders(owner))
     stats = {"indexed": 0, "unchanged": 0, "skipped": 0, "errors": 0, "removed": 0}
     while token:
-        body = _check(await google_request("GET", f"{API}/changes", account_id=account_id, owner=owner, params={"pageToken": token, "fields": f"newStartPageToken,nextPageToken,changes(fileId,removed,file({FIELDS}))"}), "ler mudancas")
+        body = _check(await google_request("GET", f"{API}/changes", account_id=account_id, owner=owner, params={"pageToken": token, "fields": f"newStartPageToken,nextPageToken,changes(fileId,removed,file({FIELDS}))"}), "ler mudanças")
         for change in body.get("changes", []):
             file = change.get("file") or {}
             if change.get("removed") or file.get("trashed") or not (set(file.get("parents", [])) & allowed):

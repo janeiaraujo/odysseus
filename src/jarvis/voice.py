@@ -55,7 +55,7 @@ def _transcribe(audio: bytes) -> str:
     from services.stt import get_stt_service
     service = get_stt_service()
     if not service.available:
-        raise VoiceUnavailable("reconhecimento de voz nao configurado")
+        raise VoiceUnavailable("reconhecimento de voz não configurado")
     return (service.transcribe(audio) or "").strip()
 
 
@@ -64,7 +64,7 @@ async def _answer_with_llm(owner: str, text: str) -> str:
     from src.jarvis.llm import complete
     from src.prompt_security import untrusted_context_message
 
-    messages: List[Dict[str, Any]] = [{"role": "system", "content": persona.system_preface() + "\nA resposta sera falada: seja breve, sem markdown."}]
+    messages: List[Dict[str, Any]] = [{"role": "system", "content": persona.system_preface() + "\nA resposta será falada: seja breve, sem markdown."}]
     context = memory.context_for_chat(text, owner=owner, limit=4)
     if context:
         messages.append(untrusted_context_message("jarvis memory", context))

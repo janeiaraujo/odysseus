@@ -45,14 +45,14 @@ class GoogleNotConfigured(RuntimeError):
 
 
 class ReconnectRequired(RuntimeError):
-    def __init__(self, account_id: str, reason: str = "reconexao necessaria"):
+    def __init__(self, account_id: str, reason: str = "reconexão necessaria"):
         super().__init__(reason)
         self.account_id = account_id
 
 
 class MissingScope(RuntimeError):
     def __init__(self, group: str):
-        super().__init__(f"a conta nao autorizou {group}")
+        super().__init__(f"a conta não autorizou {group}")
         self.group = group
 
 
@@ -115,11 +115,11 @@ def _consume_state(state: str, owner: Optional[str], *, purpose: str) -> tuple:
         if row is None or row.expires_at < utcnow():
             if row is not None:
                 db.delete(row)
-            raise OAuthStateError("estado OAuth invalido ou expirado")
+            raise OAuthStateError("estado OAuth inválido ou expirado")
         if row.purpose != purpose:
             raise OAuthStateError("estado OAuth de outro fluxo")
         if purpose == "connect" and row.owner != (owner or ""):
-            raise OAuthStateError("estado OAuth pertence a outra sessao")  # CSRF: can't link into someone else's session
+            raise OAuthStateError("estado OAuth pertence a outra sessão")  # CSRF: can't link into someone else's session
         verifier, stored_owner = decrypt(row.verifier_enc), row.owner
         db.delete(row)
     return verifier, stored_owner
@@ -131,7 +131,7 @@ async def _exchange(code: str, verifier: str, redirect_uri: str) -> Dict[str, An
         resp = await client.post(TOKEN_URL, data={"grant_type": "authorization_code", "code": code, "client_id": client_id, "client_secret": secret,
                                                   "redirect_uri": redirect_uri, "code_verifier": verifier})
     if resp.status_code != 200:
-        raise OAuthStateError("o Google recusou o codigo de autorizacao")
+        raise OAuthStateError("o Google recusou o codigo de autorização")
     return resp.json()
 
 
@@ -152,7 +152,7 @@ async def complete_connect(state: str, code: str, redirect_uri: str, owner: Opti
         taken = db.query(OAuthAccount).filter(OAuthAccount.provider == "google", OAuthAccount.subject == info["sub"], OAuthAccount.owner != owner,
                                               OAuthAccount.status != "revoked").first()
         if taken:
-            raise OAuthStateError("esta conta Google ja esta vinculada a outro usuario")
+            raise OAuthStateError("esta conta Google já esta vinculada a outro usuário")
         row = db.query(OAuthAccount).filter(OAuthAccount.owner == owner, OAuthAccount.provider == "google", OAuthAccount.subject == info["sub"]).first()
         if row is None:
             row = OAuthAccount(owner=owner, provider="google", subject=info["sub"])
@@ -177,7 +177,7 @@ async def complete_login(state: str, code: str, redirect_uri: str) -> str:
     tokens = await _exchange(code, verifier, redirect_uri)
     info = await _userinfo(tokens["access_token"])
     if info.get("email_verified") is False:
-        raise OAuthStateError("o e-mail desta conta Google nao esta verificado")
+        raise OAuthStateError("o e-mail desta conta Google não esta verificado")
     with session_scope() as db:
         row = db.query(OAuthAccount).filter(OAuthAccount.provider == "google", OAuthAccount.subject == info["sub"], OAuthAccount.status != "revoked").first()
         if row is None or not row.owner:
@@ -226,7 +226,7 @@ async def access_token(account_id: str, owner: Optional[str], *, force_refresh: 
     with session_scope() as db:
         row = db.query(OAuthAccount).filter(OAuthAccount.id == account_id, OAuthAccount.owner == (owner or "")).first()
         if row is None:
-            raise LookupError("conta Google nao encontrada")
+            raise LookupError("conta Google não encontrada")
         if row.status != "connected":
             raise ReconnectRequired(account_id)
         fresh = row.expires_at and row.expires_at > utcnow() + timedelta(seconds=60)
@@ -269,7 +269,7 @@ async def google_request(method: str, url: str, *, account_id: str, owner: Optio
             token = await access_token(account_id, owner, force_refresh=True)
             resp = await client.request(method, url, headers={"Authorization": f"Bearer {token}", **headers}, **kwargs)
             if resp.status_code == 401:
-                _mark_reauth(account_id, "401 apos renovar o token")
+                _mark_reauth(account_id, "401 após renovar o token")
                 raise ReconnectRequired(account_id)
     return resp
 
@@ -279,7 +279,7 @@ async def revoke(account_id: str, owner: Optional[str]) -> Dict[str, Any]:
     with session_scope() as db:
         row = db.query(OAuthAccount).filter(OAuthAccount.id == account_id, OAuthAccount.owner == (owner or "")).first()
         if row is None:
-            raise LookupError("conta Google nao encontrada")
+            raise LookupError("conta Google não encontrada")
         token = decrypt(row.refresh_enc or row.access_enc) if (row.refresh_enc or row.access_enc) else ""
         row.access_enc, row.refresh_enc, row.status, row.expires_at, row.updated_at = "", "", "revoked", None, utcnow()
     remote_ok = False

@@ -59,17 +59,17 @@ def evaluate(action: str, risk: str, owner: Optional[str] = "") -> Decision:
     user_rules = (autonomy.get("users") or {}).get(owner or "", {}) or {}
     global_rules = autonomy.get("global") or {}
     prefix = action.split(".", 1)[0]
-    for scope, rules in (("usuario", user_rules), ("global", global_rules)):
+    for scope, rules in (("usuário", user_rules), ("global", global_rules)):
         for key in (action, f"{prefix}.*", risk):
             if key in rules:
                 mode = rules[key]
                 if mode == DENY:
                     return Decision(DENY, f"regra {scope}:{key}")
                 if mode == AUTO and risk in _ALWAYS_CONFIRM:
-                    return Decision(CONFIRM, f"{risk} sempre exige aprovacao")
+                    return Decision(CONFIRM, f"{risk} sempre exige aprovação")
                 if mode in (AUTO, CONFIRM):
                     return Decision(mode, f"regra {scope}:{key}")
-    return Decision(DEFAULT_MODES[risk], f"padrao para {risk}")
+    return Decision(DEFAULT_MODES[risk], f"padrão para {risk}")
 
 
 def request_approval(action: str, risk: str, owner: Optional[str], summary: str, payload: Dict[str, Any]) -> str:
@@ -132,7 +132,7 @@ async def decide(approval_id: str, approve: bool, *, owner: Optional[str], decid
         claimed = q.update({"status": "approved" if approve else "rejected", "decided_at": utcnow(), "decided_by": decided_by},
                            synchronize_session=False)
         if not claimed:
-            raise LookupError("aprovacao inexistente, expirada ou ja decidida")
+            raise LookupError("aprovação inexistente, expirada ou já decidida")
         row = db.get(Approval, approval_id)
         action, risk, row_owner, payload_enc = row.action, row.risk, row.owner, row.payload_enc
     audit.record("approval.approved" if approve else "approval.rejected", owner=row_owner, actor=decided_by or "user",

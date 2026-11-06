@@ -128,7 +128,7 @@ def test_incremental_consent_keeps_refresh_token_and_merges_scopes(google):
 
 def test_same_google_account_cannot_link_to_two_users(google):
     _connect("ana")
-    with pytest.raises(oauth.OAuthStateError, match="outro usuario"):
+    with pytest.raises(oauth.OAuthStateError, match="outro usuário"):
         _connect("bob")
 
 
@@ -282,6 +282,8 @@ def test_parse_html_only_strips_scripts():
     ("Check-in disponivel", "seu voo sai as 10h", "noreply@latam.com", "Viagens"),
     ("Seu pedido foi enviado", "rastreamento: X", "loja@amazon.com", "Compras"),
     ("Reuniao de projeto", "segue o relatorio", "chefe@empresa.com", "Trabalho"),
+    ("Reunião de projeto", "segue o relatório", "chefe@empresa.com", "Trabalho"),
+    ("Cobrança: nota fiscal", "", "a@b.com", "Financeiro"),
     ("xyz", "abc", "z@z.com", "Outros"),
 ])
 def test_rule_classification(subject, body, sender, category):

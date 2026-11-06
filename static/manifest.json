@@ -1,7 +1,7 @@
 {
-  "name": "Odysseus",
-  "short_name": "Odysseus",
-  "description": "Self-hosted AI chat with memory, documents, and tools",
+  "name": "J.A.R.V.I.S.",
+  "short_name": "Jarvis",
+  "description": "Assistente pessoal de IA, auto-hospedado, com memória, documentos e ferramentas",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

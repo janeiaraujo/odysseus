@@ -148,7 +148,7 @@ def decide_candidate(candidate_id: str, accept: bool, *, owner: Optional[str] = 
                                                      LearningCandidate.status == "pending").update(
             {"status": "accepted" if accept else "rejected", "decided_at": utcnow()}, synchronize_session=False)
         if not claimed:
-            raise LookupError("candidato inexistente ou ja decidido")
+            raise LookupError("candidato inexistente ou já decidido")
         row = db.get(LearningCandidate, candidate_id)
         text, category, signal, source_type, source_ref, confidence = row.text, row.category, row.signal, row.source_type, row.source_ref, row.confidence
     if not accept:
@@ -157,8 +157,8 @@ def decide_candidate(candidate_id: str, accept: bool, *, owner: Optional[str] = 
     if signal == "correction":  # replace what the user was correcting, keeping its history
         hits = memory.search(final, owner=owner, k=1, include_hypotheses=True)
         if hits and memory.similarity(hits[0]["text"], final) >= 0.3:
-            item = memory.correct(hits[0]["id"], final, owner=owner, reason="correcao aprendida em conversa")
-            add_training_example("correcao", final, owner=owner, source="correction")
+            item = memory.correct(hits[0]["id"], final, owner=owner, reason="correção aprendida em conversa")
+            add_training_example("correção", final, owner=owner, source="correction")
             return {"status": "accepted", "result": {"action": "corrected", "item": item}}
     # A human confirmed it, so an originally untrusted text is now user knowledge.
     result = memory.remember(final, owner=owner, category=category, source_type="user",
@@ -185,7 +185,7 @@ def validate_example(example_id: str, validated: bool, owner: Optional[str] = ""
     with session_scope() as db:
         updated = db.query(TrainingExample).filter(TrainingExample.id == example_id, TrainingExample.owner == (owner or "")).update({"validated": validated})
         if not updated:
-            raise LookupError("exemplo nao encontrado")
+            raise LookupError("exemplo não encontrado")
 
 
 def export_dataset(owner: Optional[str] = "") -> Dict[str, Any]:
@@ -217,7 +217,7 @@ def plan_training(dataset_id: str, base_model: str, owner: Optional[str] = "", m
     with session_scope() as db:
         dataset = db.query(DatasetVersion).filter(DatasetVersion.id == dataset_id, DatasetVersion.owner == (owner or "")).first()
         if dataset is None:
-            raise LookupError("dataset nao encontrado")
+            raise LookupError("dataset não encontrado")
         run = TrainingRun(owner=owner or "", dataset_id=dataset_id, base_model=base_model, method=method)
         db.add(run)
         db.flush()
@@ -227,11 +227,11 @@ def plan_training(dataset_id: str, base_model: str, owner: Optional[str] = "", m
 
 def record_training_result(run_id: str, *, status: str, output_ref: str = "", metrics: Optional[Dict[str, Any]] = None, owner: Optional[str] = "") -> None:
     if status not in ("running", "succeeded", "failed"):
-        raise ValueError("status invalido")
+        raise ValueError("status inválido")
     with session_scope() as db:
         run = db.query(TrainingRun).filter(TrainingRun.id == run_id, TrainingRun.owner == (owner or "")).first()
         if run is None:
-            raise LookupError("treinamento nao encontrado")
+            raise LookupError("treinamento não encontrado")
         run.status, run.output_ref, run.metrics = status, output_ref, json.dumps(metrics or {})
         if status != "running":
             run.finished_at = utcnow()
@@ -242,7 +242,7 @@ def activate_training(run_id: str, owner: Optional[str] = "") -> None:
     with session_scope() as db:
         run = db.query(TrainingRun).filter(TrainingRun.id == run_id, TrainingRun.owner == (owner or ""), TrainingRun.status == "succeeded").first()
         if run is None:
-            raise LookupError("apenas treinamentos concluidos podem ser ativados")
+            raise LookupError("apenas treinamentos concluídos podem ser ativados")
         db.query(TrainingRun).filter(TrainingRun.owner == (owner or ""), TrainingRun.status == "active").update({"status": "succeeded"})
         run.status = "active"
 

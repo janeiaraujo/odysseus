@@ -31,7 +31,7 @@ PROVIDERS = {
     "api.deepseek.com": "deepseek", "api.together.xyz": "together",
 }
 PROFILES: Dict[str, Dict[str, Any]] = {
-    "economico": {"label": "Economico", "tiers": [LOCAL, FREE], "quality": 0.5, "requires": set()},
+    "economico": {"label": "Econômico", "tiers": [LOCAL, FREE], "quality": 0.5, "requires": set()},
     "local": {"label": "Local", "tiers": [LOCAL], "quality": 1.0, "requires": set()},
     "equilibrado": {"label": "Equilibrado", "tiers": [LOCAL, FREE, PAID], "quality": 1.0, "requires": set()},
     "alta_qualidade": {"label": "Alta qualidade", "tiers": [PAID, LOCAL, FREE], "quality": 3.0, "requires": set()},
@@ -211,7 +211,7 @@ def budget_exceeded(owner: Optional[str] = None) -> bool:
 def paid_allowed(model: str, owner: Optional[str] = "", chain: Optional[Set[str]] = None) -> Tuple[bool, str]:
     """May a paid model be used WITHOUT the user having manually selected it?"""
     if budget_exceeded(owner):
-        return False, "orcamento mensal atingido"
+        return False, "orçamento mensal atingido"
     mode = config.get("router.paid_fallback_mode", "configured")
     if mode == "always":
         return True, "modo always"
@@ -219,8 +219,8 @@ def paid_allowed(model: str, owner: Optional[str] = "", chain: Optional[Set[str]
         return False, "modo never"
     allow = set(config.get("router.paid_model_allowlist", []) or [])
     if model in allow or model in (chain if chain is not None else _configured_chain(owner)):
-        return True, "listado pelo usuario"
-    return False, "modelo pago sem autorizacao"
+        return True, "listado pelo usuário"
+    return False, "modelo pago sem autorização"
 
 
 def filter_fallback_candidates(candidates: Sequence[Tuple[str, str, Dict]], owner: Optional[str] = "") -> List[Tuple[str, str, Dict]]:
@@ -274,7 +274,7 @@ def _availability(stat: Optional[Dict[str, Any]], model: str) -> Tuple[bool, str
         return True, ""
     age = utcnow() - stat["last_ts"]
     if stat["streak"] and stat["last_err"] == "rate_limit" and age < RATE_LIMIT_COOLDOWN:
-        return False, "limite de requisicoes (429), aguardando"
+        return False, "limite de requisições (429), aguardando"
     if stat["streak"] >= 3 and age < FAILURE_COOLDOWN:
         return False, f"{stat['streak']} falhas seguidas, em pausa"
     rpm = (config.get("router.rate_limit_rpm", {}) or {}).get(model)

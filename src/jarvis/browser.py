@@ -90,7 +90,7 @@ class Session:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            raise BrowserUnavailable("Playwright nao instalado; veja docs/integrations/browser.md") from None
+            raise BrowserUnavailable("Playwright não instalado; veja docs/integrations/browser.md") from None
         self._playwright = await async_playwright().start()
         endpoint = os.environ.get("JARVIS_BROWSER_WS")
         try:
@@ -103,7 +103,7 @@ class Session:
                 self._browser = await self._playwright.chromium.launch(**options)
         except Exception as exc:
             await self._playwright.stop()
-            raise BrowserUnavailable(f"navegador indisponivel: {type(exc).__name__}") from None
+            raise BrowserUnavailable(f"navegador indisponível: {type(exc).__name__}") from None
         kwargs: Dict[str, Any] = {"accept_downloads": False}
         state = _load_state(self.owner) if self.persist else None
         if state:
@@ -144,7 +144,7 @@ class Session:
         html = await self.page.content()
         if _CAPTCHA.search(html):
             audit.record("browser.human_required", owner=self.owner, target=url[:200])
-            raise HumanRequired("a pagina exige verificacao humana; nao vou tentar contornar")
+            raise HumanRequired("a página exige verificação humana; não vou tentar contornar")
         limit = int(config.get("browser.max_text_chars", 20000))
         text = (await self.page.inner_text("body"))[:limit] if await self.page.query_selector("body") else ""
         links = await self.page.eval_on_selector_all("a[href]", "els => els.slice(0, 50).map(e => ({text: e.innerText.trim().slice(0, 120), href: e.href}))")
@@ -173,7 +173,7 @@ class Session:
         risk = policy.FINANCIAL if _IRREVERSIBLE.search(f"{label} {selector}") else policy.EXTERNAL
         decision = policy.evaluate("browser.submit", risk, self.owner)
         if decision.mode == policy.DENY or (decision.mode == policy.CONFIRM and not approved):
-            raise policy.ApprovalRequired(policy.request_approval("browser.submit", risk, self.owner, f"Enviar formulario em {self.page.url[:120]} ({label or selector})", {"url": self.page.url, "selector": selector}))
+            raise policy.ApprovalRequired(policy.request_approval("browser.submit", risk, self.owner, f"Enviar formulário em {self.page.url[:120]} ({label or selector})", {"url": self.page.url, "selector": selector}))
         await self.page.click(selector)
         audit.record("browser.submit", owner=self.owner, risk=risk, target=self.page.url[:200])
         return {"url": self.page.url}
@@ -186,7 +186,7 @@ def as_untrusted(page: Dict[str, Any]) -> Dict[str, Any]:
 
 async def report(owner: str, urls: List[str], *, session_factory: Callable[..., Session] = Session) -> Dict[str, Any]:
     """Visit pages and produce a markdown report, recording what could not be read."""
-    lines, errors = ["# Relatorio de navegacao", ""], []
+    lines, errors = ["# Relatório de navegação", ""], []
     async with session_factory(owner) as session:
         for url in urls[:10]:
             try:

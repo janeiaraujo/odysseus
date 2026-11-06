@@ -25,14 +25,14 @@ def _check(resp: Any, what: str) -> Any:
 
 async def create_session(owner: str, account_id: Optional[str] = None) -> Dict[str, Any]:
     account_id = account_id or default_account(owner, "photos")
-    body = _check(await google_request("POST", f"{API}/sessions", account_id=account_id, owner=owner, json={}), "criar sessao")
+    body = _check(await google_request("POST", f"{API}/sessions", account_id=account_id, owner=owner, json={}), "criar sessão")
     audit.record("photos.session", owner=owner)
     return {"session_id": body.get("id", ""), "picker_uri": body.get("pickerUri", ""), "ready": bool(body.get("mediaItemsSet")), "poll": body.get("pollingConfig", {})}
 
 
 async def session_status(owner: str, session_id: str, account_id: Optional[str] = None) -> Dict[str, Any]:
     account_id = account_id or default_account(owner, "photos")
-    body = _check(await google_request("GET", f"{API}/sessions/{session_id}", account_id=account_id, owner=owner), "ler sessao")
+    body = _check(await google_request("GET", f"{API}/sessions/{session_id}", account_id=account_id, owner=owner), "ler sessão")
     return {"session_id": session_id, "ready": bool(body.get("mediaItemsSet")), "poll": body.get("pollingConfig", {})}
 
 
@@ -73,6 +73,6 @@ async def analyze_item(owner: str, item: Dict[str, Any], describe: Callable[[byt
     return {"id": item.get("id", ""), "description": description}
 
 
-def vision_request(image: bytes, mime: str, prompt: str = "Descreva a imagem em portugues, listando os objetos visiveis.") -> List[Dict[str, Any]]:
+def vision_request(image: bytes, mime: str, prompt: str = "Descreva a imagem em português, listando os objetos visiveis.") -> List[Dict[str, Any]]:
     data = base64.b64encode(image).decode()
     return [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}}]}]

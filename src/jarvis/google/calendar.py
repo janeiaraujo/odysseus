@@ -33,7 +33,7 @@ def _check(resp: Any, what: str) -> Any:
 
 async def list_calendars(owner: str, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
     account_id = account_id or default_account(owner, "calendar")
-    body = _check(await google_request("GET", f"{API}/users/me/calendarList", account_id=account_id, owner=owner), "listar calendarios")
+    body = _check(await google_request("GET", f"{API}/users/me/calendarList", account_id=account_id, owner=owner), "listar calendários")
     return [{"id": c["id"], "name": c.get("summary", ""), "primary": bool(c.get("primary")), "access": c.get("accessRole", "")} for c in body.get("items", [])]
 
 
@@ -47,7 +47,7 @@ async def list_events(owner: str, *, start: datetime, end: datetime, query: str 
 
 
 def _event_view(event: Dict[str, Any]) -> Dict[str, Any]:
-    return {"id": event.get("id", ""), "title": event.get("summary", "(sem titulo)"), "start": event.get("start", {}), "end": event.get("end", {}),
+    return {"id": event.get("id", ""), "title": event.get("summary", "(sem título)"), "start": event.get("start", {}), "end": event.get("end", {}),
             "location": event.get("location", ""), "recurring": bool(event.get("recurringEventId") or event.get("recurrence")),
             "attendees": [a.get("email", "") for a in event.get("attendees", [])], "status": event.get("status", ""), "reminders": event.get("reminders", {})}
 
@@ -160,7 +160,7 @@ def _apply_local(owner: str, account_id: str, calendar_name: str, events: List[D
                 created += 1
             else:
                 updated += 1
-            row.summary, row.description, row.location = event.get("summary", "(sem titulo)"), event.get("description", ""), event.get("location", "")
+            row.summary, row.description, row.location = event.get("summary", "(sem título)"), event.get("description", ""), event.get("location", "")
             row.dtstart, row.dtend, row.all_day, row.is_utc, row.status, row.origin = start, end, all_day, not all_day, "confirmed", "google"
         db.commit()
     finally:
@@ -207,7 +207,7 @@ async def sync(owner: str, account_id: Optional[str] = None) -> Dict[str, int]:
             with session_scope() as db:
                 db.query(SyncState).filter(SyncState.owner == owner, SyncState.provider == "google", SyncState.resource == resource).update({"cursor": ""})
             return await sync(owner, account_id)
-        body = _check(resp, "sincronizar calendario")
+        body = _check(resp, "sincronizar calendário")
         for key, value in _apply_local(owner, account_id, "Google Calendar", body.get("items", [])).items():
             totals[key] += value
         page = body.get("nextPageToken", "")

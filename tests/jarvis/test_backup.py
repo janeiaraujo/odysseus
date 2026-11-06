@@ -139,7 +139,7 @@ def test_existing_target_is_never_overwritten(tmp_path, source):
     target = tmp_path / "live"
     target.mkdir()
     (target / "keep.txt").write_text("atual")
-    with pytest.raises(backup.BackupError, match="nao esta vazio"):
+    with pytest.raises(backup.BackupError, match="não está vazio"):
         backup.restore_backup(out, KEY, data_dir=target)
     assert (target / "keep.txt").read_text() == "atual"
     result = backup.restore_backup(out, KEY, data_dir=target, force=True)

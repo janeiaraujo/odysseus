@@ -38,7 +38,7 @@ def normalize_events(raw: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         end, _ = _parse(ev.get("dtend") or ev["dtstart"])
         if end < start:
             end = start
-        out.append({"uid": ev.get("uid", ""), "title": ev.get("summary") or ev.get("title") or "(sem titulo)",
+        out.append({"uid": ev.get("uid", ""), "title": ev.get("summary") or ev.get("title") or "(sem título)",
                     "location": ev.get("location") or "", "start": start, "end": end, "all_day": all_day})
     out.sort(key=lambda e: e["start"])
     return out

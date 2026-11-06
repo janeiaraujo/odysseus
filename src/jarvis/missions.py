@@ -58,17 +58,17 @@ def next_run(cron: str, tz: str, after: Optional[datetime] = None) -> datetime:
 
 def create(owner: str, title: str, steps: List[Dict[str, Any]], *, goal: str = "", cron: Optional[str] = None, tz: str = "America/Sao_Paulo") -> Dict[str, Any]:
     if not steps or len(steps) > MAX_STEPS:
-        raise ValueError(f"a missao precisa de 1 a {MAX_STEPS} passos")
+        raise ValueError(f"a missão precisa de 1 a {MAX_STEPS} passos")
     for i, step in enumerate(steps):
         if step.get("handler") not in REGISTRY:
-            raise ValueError(f"acao desconhecida: {step.get('handler')}")
+            raise ValueError(f"ação desconhecida: {step.get('handler')}")
         for dep in step.get("depends_on", []) or []:
             if not isinstance(dep, int) or dep < 0 or dep >= i:
-                raise ValueError(f"dependencia invalida no passo {i}")  # earlier steps only: no cycles
+                raise ValueError(f"dependencia inválida no passo {i}")  # earlier steps only: no cycles
         if not isinstance(step.get("params", {}), dict):
             raise ValueError(f"parametros invalidos no passo {i}")
     if cron and not croniter.is_valid(cron):
-        raise ValueError("agendamento cron invalido")
+        raise ValueError("agendamento cron inválido")
     with session_scope() as db:
         mission = Mission(owner=owner or "", title=title[:200], goal=goal[:2000], cron=cron, timezone=tz, next_run_at=next_run(cron, tz) if cron else None)
         db.add(mission)
@@ -96,7 +96,7 @@ def get(owner: Optional[str], mission_id: str) -> Dict[str, Any]:
             q = q.filter(Mission.owner == (owner or ""))
         mission = q.first()
         if mission is None:
-            raise LookupError("missao nao encontrada")
+            raise LookupError("missão não encontrada")
         return _view(mission, db.query(MissionStep).filter(MissionStep.mission_id == mission.id).order_by(MissionStep.idx).all())
 
 
@@ -116,7 +116,7 @@ def cancel(owner: Optional[str], mission_id: str) -> None:
             q = q.filter(Mission.owner == (owner or ""))
         mission = q.first()
         if mission is None:
-            raise LookupError("missao nao encontrada")
+            raise LookupError("missão não encontrada")
         mission.status, mission.next_run_at, mission.updated_at = "cancelled", None, utcnow()
         db.query(MissionStep).filter(MissionStep.mission_id == mission.id, MissionStep.status.in_(("pending", "waiting_approval"))).update({"status": "cancelled"}, synchronize_session=False)
     audit.record("mission.cancel", owner=owner, risk="reversible", target=mission_id)
@@ -127,7 +127,7 @@ def _approved_step(owner: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     with session_scope() as db:
         updated = db.query(MissionStep).filter(MissionStep.id == payload.get("step_id"), MissionStep.status == "waiting_approval").update({"status": "pending", "retry_at": None, "approval_id": "approved"}, synchronize_session=False)
     if not updated:
-        raise LookupError("passo nao aguarda aprovacao")
+        raise LookupError("passo não aguarda aprovação")
     return {"resumed": payload["step_id"]}
 
 
@@ -155,9 +155,9 @@ def _recover_leases(now: datetime) -> int:
         for step in db.query(MissionStep).filter(MissionStep.status == "running", MissionStep.lease_until < now).all():
             handler = REGISTRY.get(step.handler)
             if handler and handler.idempotent and step.attempts < step.max_attempts:
-                step.status, step.retry_at, step.error = "pending", now, "retomado apos interrupcao"
+                step.status, step.retry_at, step.error = "pending", now, "retomado após interrupcao"
             else:
-                step.status, step.error = "failed", "interrompido; nao repetido automaticamente porque pode ter tido efeito externo"
+                step.status, step.error = "failed", "interrompido; não repetido automaticamente porque pode ter tido efeito externo"
             recovered += 1
     return recovered
 
@@ -174,7 +174,7 @@ def _runnable(limit: int, now: datetime) -> List[str]:
             siblings = statuses.setdefault(step.mission_id, {s.idx: s.status for s in db.query(MissionStep.idx, MissionStep.status).filter(MissionStep.mission_id == step.mission_id).all()})
             deps = json.loads(step.depends_on or "[]")
             if any(siblings.get(d) in ("failed", "cancelled") for d in deps):
-                step.status, step.error = "cancelled", "dependencia nao concluida"
+                step.status, step.error = "cancelled", "dependencia não concluída"
                 siblings[step.idx] = "cancelled"
                 continue
             if not all(siblings.get(d) == "succeeded" for d in deps):
@@ -195,14 +195,14 @@ async def _run_step(step_id: str) -> str:
         previous = {s.idx: s.result for s in db.query(MissionStep).filter(MissionStep.mission_id == mission_id, MissionStep.status == "succeeded").all()}
     handler = REGISTRY.get(name)
     if handler is None:
-        _finish(step_id, "failed", error=f"acao desconhecida: {name}")
+        _finish(step_id, "failed", error=f"ação desconhecida: {name}")
         return "failed"
     decision = policy.evaluate(f"mission.{name}", handler.risk, owner)
     if decision.mode == policy.DENY:
-        _finish(step_id, "failed", error=f"negado pela politica: {decision.reason}")
+        _finish(step_id, "failed", error=f"negado pela política: {decision.reason}")
         return "failed"
     if decision.mode == policy.CONFIRM and not approved:
-        approval = policy.request_approval("mission.step", handler.risk, owner, f"Missao: executar '{name}'", {"step_id": step_id})
+        approval = policy.request_approval("mission.step", handler.risk, owner, f"Missão: executar '{name}'", {"step_id": step_id})
         with session_scope() as db:
             row = db.get(MissionStep, step_id)
             row.status, row.approval_id, row.attempts = "waiting_approval", approval, max(0, row.attempts - 1)
@@ -262,7 +262,7 @@ async def tick(limit: int = 10) -> Dict[str, int]:
         audit.record("mission.finished", owner=mission["owner"], target=mission["id"], outcome=mission["status"])
         try:
             from src.jarvis.notify import notify
-            await notify(mission["owner"], f"Missao {'concluida' if mission['status'] == 'completed' else 'falhou'}: {mission['title']}")
+            await notify(mission["owner"], f"Missão {'concluída' if mission['status'] == 'completed' else 'falhou'}: {mission['title']}")
         except Exception as exc:
             logger.info("mission notification failed: %s", redact_text(exc))
     return stats
@@ -282,22 +282,22 @@ def validate_plan(raw: Any) -> List[Dict[str, Any]]:
             raise ValueError("plano sem lista JSON")
         raw = json.loads(match.group(0))
     if not isinstance(raw, list):
-        raise ValueError("plano invalido")
+        raise ValueError("plano inválido")
     plan = []
     for i, step in enumerate(raw[:MAX_STEPS]):
         handler = REGISTRY.get(step.get("handler")) if isinstance(step, dict) else None
         if handler is None:
-            raise ValueError(f"passo {i}: acao nao permitida")
+            raise ValueError(f"passo {i}: ação não permitida")
         params = step.get("params") or {}
         if not isinstance(params, dict) or set(params) - set(handler.params):
-            raise ValueError(f"passo {i}: parametros nao permitidos")
+            raise ValueError(f"passo {i}: parametros não permitidos")
         plan.append({"title": str(step.get("title") or step["handler"])[:200], "handler": step["handler"], "params": params, "depends_on": step.get("depends_on") or []})
     return plan
 
 
 def planner_messages(goal: str) -> List[Dict[str, Any]]:
     catalog = json.dumps(handler_catalog(), ensure_ascii=False)
-    return [{"role": "system", "content": "Divida o objetivo do usuario em passos usando SOMENTE estas acoes. Responda apenas com uma lista JSON de objetos {title, handler, params, depends_on}, onde depends_on sao indices de passos anteriores.\nAcoes: " + catalog},
+    return [{"role": "system", "content": "Divida o objetivo do usuário em passos usando SOMENTE estas ações. Responda apenas com uma lista JSON de objetos {title, handler, params, depends_on}, onde depends_on sao indices de passos anteriores.\nAcoes: " + catalog},
             {"role": "user", "content": goal[:2000]}]
 
 
@@ -364,13 +364,13 @@ async def _h_home(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> Di
     from src.jarvis import home
     device = next((d for d in home.list_devices(owner) if d["entity_id"] == params.get("entity_id")), None)
     if device is None:
-        raise LookupError("dispositivo nao encontrado")
+        raise LookupError("dispositivo não encontrado")
     return await home.execute(device, params.get("op", ""), params.get("value"), owner=owner)
 
 
 async def _h_memory_note(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     from src.jarvis import memory
-    return memory.remember(str(params.get("text", "")), owner=owner, kind="episodic", category="missao", source_type="system")["item"]
+    return memory.remember(str(params.get("text", "")), owner=owner, kind="episodic", category="missão", source_type="system")["item"]
 
 
 async def _h_llm(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> str:
@@ -380,12 +380,12 @@ async def _h_llm(owner: str, params: Dict[str, Any], ctx: Dict[str, Any]) -> str
 
 register("agenda.brief", _h_brief, description="Resumo do dia: data, compromissos e pendencias")
 register("agenda.day", _h_agenda, description="Compromissos de um dia", params=("day",))
-register("notify", _h_notify, policy.REVERSIBLE, idempotent=False, description="Notifica o usuario; from_step usa o resultado de um passo", params=("title", "body", "from_step"))
-register("memory.consolidate", _h_consolidate, policy.REVERSIBLE, description="Consolida memorias duplicadas")
+register("notify", _h_notify, policy.REVERSIBLE, idempotent=False, description="Notifica o usuário; from_step usa o resultado de um passo", params=("title", "body", "from_step"))
+register("memory.consolidate", _h_consolidate, policy.REVERSIBLE, description="Consolida memórias duplicadas")
 register("memory.note", _h_memory_note, policy.REVERSIBLE, description="Registra um fato episodico", params=("text",))
 register("gmail.triage", _h_gmail_triage, policy.REVERSIBLE, description="Classifica e-mails novos, sem enviar nada", params=("apply_labels",))
 register("gmail.important", _h_gmail_important, policy.REVERSIBLE, description="Lista e-mails novos importantes", params=("category",))
 register("calendar.sync", _h_calendar_sync, policy.REVERSIBLE, description="Sincroniza o Google Calendar")
 register("drive.sync", _h_drive_sync, policy.REVERSIBLE, description="Sincroniza pastas autorizadas do Drive")
-register("home.control", _h_home, policy.REVERSIBLE, idempotent=False, description="Aciona dispositivo; a politica do dispositivo tambem se aplica", params=("entity_id", "op", "value"))
+register("home.control", _h_home, policy.REVERSIBLE, idempotent=False, description="Aciona dispositivo; a política do dispositivo também se aplica", params=("entity_id", "op", "value"))
 register("llm.prompt", _h_llm, policy.REVERSIBLE, description="Pergunta a um modelo escolhido pelo roteador", params=("prompt",))

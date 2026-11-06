@@ -43,7 +43,7 @@ def _derive(master: bytes, namespace: str) -> bytes:
 class ZeroKeyStore:
     def __init__(self, backend: StorageBackend, namespace: str, *, master_key: bytes, owner: str = ""):
         if not namespace.replace("-", "").replace("_", "").isalnum():
-            raise StorageError("namespace invalido")
+            raise StorageError("namespace inválido")
         self.backend, self.namespace, self.owner = backend, namespace, owner
         self._key = _derive(master_key, namespace)
 
@@ -57,7 +57,7 @@ class ZeroKeyStore:
         token = base64.urlsafe_b64encode(nonce + AESGCM(self._key).encrypt(nonce, plaintext, self.namespace.encode())).decode().rstrip("=")
         key = self._prefix() + token
         if len(key.encode()) > MAX_KEY_BYTES:
-            raise ValueTooLarge(f"valor nao cabe em uma chave de {MAX_KEY_BYTES} bytes; use um objeto normal")
+            raise ValueTooLarge(f"valor não cabe em uma chave de {MAX_KEY_BYTES} bytes; use um objeto normal")
         return key
 
     def _open(self, key: str) -> Dict[str, Any]:
@@ -139,7 +139,7 @@ def compare_costs(records_per_month: int, avg_record_bytes: int = 200, batch_siz
     batches = max(1, -(-records_per_month // max(batch_size, 1)))
     return {
         "records_per_month": records_per_month,
-        "zero_byte": {"class_a": records_per_month, "write_cost_usd": cost(records_per_month), "storage_cost": "nao documentado pela Cloudflare"},
+        "zero_byte": {"class_a": records_per_month, "write_cost_usd": cost(records_per_month), "storage_cost": "não documentado pela Cloudflare"},
         "batched": {"class_a": batches, "write_cost_usd": cost(batches),
                     "storage_gb": round(records_per_month * avg_record_bytes / 1e9, 4)},
         "recommendation": "batched" if records_per_month > batch_size else "qualquer um",

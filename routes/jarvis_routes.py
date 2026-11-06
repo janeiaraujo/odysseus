@@ -46,7 +46,7 @@ class _JarvisRoute(APIRoute):
             except policy.ApprovalRequired as exc:
                 return JSONResponse(status_code=202, content={"pending_approval": exc.approval_id})
             except policy.ActionDenied as exc:
-                raise HTTPException(403, f"negado pela politica: {exc}") from None
+                raise HTTPException(403, f"negado pela política: {exc}") from None
             except oauth.ReconnectRequired as exc:
                 return JSONResponse(status_code=409, content={"reconnect_required": True, "account_id": exc.account_id, "detail": "reconecte a conta Google"})
             except oauth.MissingScope as exc:
@@ -241,10 +241,10 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         owner = _admin(request)
         unknown = set(patch) - PATCHABLE_CONFIG
         if unknown:
-            raise HTTPException(400, f"configuracao nao editavel: {sorted(unknown)}")
+            raise HTTPException(400, f"configuração não editável: {sorted(unknown)}")
         mode = (patch.get("router") or {}).get("paid_fallback_mode")
         if mode is not None and mode not in ("never", "configured", "always"):
-            raise HTTPException(400, "paid_fallback_mode invalido")
+            raise HTTPException(400, "paid_fallback_mode inválido")
         updated = config.update_config(patch)
         audit.record("config.update", owner=owner, risk="reversible", sections=sorted(patch))
         return _scrub_config(updated)
@@ -329,7 +329,7 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         """Copies Odysseus memories into Jarvis. The source file isn't changed."""
         owner = _owner(request)
         if memory_manager is None:
-            raise HTTPException(503, "memoria do Odysseus indisponivel")
+            raise HTTPException(503, "memória do Odysseus indisponível")
         return memory.import_odysseus(memory_manager.load(owner=owner or None), owner)
 
     @r.get("/learning/candidates")
@@ -409,6 +409,10 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     @r.delete("/google/accounts/{account_id}")
     async def google_revoke(account_id: str, request: Request):
         return await oauth.revoke(account_id, _admin(request))
+
+    @r.get("/google/login-available")
+    async def google_login_available():
+        return {"available": oauth.is_configured()}
 
     @r.get("/google/login")
     async def google_login(request: Request):
@@ -545,7 +549,7 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         owner = _admin(request)
         item = next((i for i in await photos.list_items(owner, body.session_id) if i["id"] == body.item_id), None)
         if item is None:
-            raise LookupError("foto nao encontrada nesta sessao")
+            raise LookupError("foto não encontrada nesta sessão")
 
         async def describe(image: bytes, mime: str) -> str:
             return await _describe_image(owner, image, mime)
@@ -582,7 +586,7 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     @r.delete("/home/devices/{device_id}")
     async def home_delete(device_id: str, request: Request):
         if not home.delete_device(_admin(request), device_id):
-            raise LookupError("dispositivo nao encontrado")
+            raise LookupError("dispositivo não encontrado")
         return {"deleted": True}
 
     @r.post("/home/control")
@@ -590,7 +594,7 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         owner = _admin(request)
         device = next((d for d in home.list_devices(owner) if d["id"] == body.device_id), None)
         if device is None:
-            raise LookupError("dispositivo nao encontrado")
+            raise LookupError("dispositivo não encontrado")
         return await home.execute(device, body.op, body.value, owner=owner)
 
     # --- Voice ---

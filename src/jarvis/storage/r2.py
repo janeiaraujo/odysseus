@@ -64,7 +64,7 @@ class R2Backend(StorageBackend):
         bucket, access, secret = env.get("JARVIS_R2_BUCKET", ""), env.get("JARVIS_R2_ACCESS_KEY_ID", ""), env.get("JARVIS_R2_SECRET_ACCESS_KEY", "")
         missing = [n for n, v in (("JARVIS_R2_ACCOUNT_ID", endpoint), ("JARVIS_R2_BUCKET", bucket), ("JARVIS_R2_ACCESS_KEY_ID", access), ("JARVIS_R2_SECRET_ACCESS_KEY", secret)) if not v]
         if missing:
-            raise StorageError("R2 nao configurado; faltam: " + ", ".join(missing))
+            raise StorageError("R2 não configurado; faltam: " + ", ".join(missing))
         return cls(endpoint, bucket, access, secret)
 
     def _url(self, key: str = "", query: str = "") -> str:
@@ -107,7 +107,7 @@ class R2Backend(StorageBackend):
         self._meter("put", "A", size)
         info = self.head(key)
         if info is None or info.size != size:
-            raise IntegrityError(f"tamanho divergente apos upload: {key}")
+            raise IntegrityError(f"tamanho divergente após upload: {key}")
         return {"key": key, "size": size, "sha256": digest}
 
     def get_bytes(self, key: str) -> bytes:

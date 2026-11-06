@@ -84,7 +84,7 @@ def test_conflict_detected_and_resolved():
 
 def test_negation_is_conflict_but_unrelated_text_is_not():
     memory.remember("Gosto de reunioes pela manha", owner="")
-    assert memory.remember("Nao gosto de reunioes pela manha", owner="")["action"] == "conflict"
+    assert memory.remember("Não gosto de reunioes pela manha", owner="")["action"] == "conflict"
     assert memory.remember("Tenho um gato chamado Tom", owner="")["action"] == "created"
 
 
@@ -161,7 +161,7 @@ def test_vector_failure_does_not_break_search():
             raise RuntimeError("chroma down")
     memory.set_vector_store(Broken())
     memory.remember("Reuniao de orcamento", owner="")
-    assert memory.search("orcamento", owner="")[0]["text"] == "Reuniao de orcamento"
+    assert memory.search("orçamento", owner="")[0]["text"] == "Reuniao de orcamento"
 
 
 def test_import_from_odysseus_is_idempotent_and_read_only():

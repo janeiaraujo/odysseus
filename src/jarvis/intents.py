@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Tuple
 from src.jarvis import agenda, audit, config, home, learning, memory, policy
 
 _WEEKDAYS = {"segunda": 0, "terca": 1, "quarta": 2, "quinta": 3, "sexta": 4, "sabado": 5, "domingo": 6}
-_WEEKDAY_NAMES = ["segunda-feira", "terca-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sabado", "domingo"]
+_WEEKDAY_NAMES = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 _NUMBERS = {"uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "quatro": 4, "cinco": 5, "seis": 6, "meia": 0.5}
 _DAY = r"(hoje|amanha|depois de amanha|(?:n[ao] )?(?:segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?|(?:esta|essa|nesta|nessa|proxima) semana)"
 _AGENDA = re.compile(
@@ -87,16 +87,16 @@ def _day_range(day: str) -> Tuple[datetime, datetime, str]:
     if day == "hoje":
         return now, midnight + timedelta(days=1), "hoje"
     if day == "amanha":
-        return midnight + timedelta(days=1), midnight + timedelta(days=2), "amanha"
+        return midnight + timedelta(days=1), midnight + timedelta(days=2), "amanhã"
     if day == "depois de amanha":
-        return midnight + timedelta(days=2), midnight + timedelta(days=3), "depois de amanha"
+        return midnight + timedelta(days=2), midnight + timedelta(days=3), "depois de amanhã"
     if day in _WEEKDAYS:
         delta = (_WEEKDAYS[day] - now.weekday()) % 7 or 7
         start = midnight + timedelta(days=delta)
         return start, start + timedelta(days=1), f"{_WEEKDAY_NAMES[_WEEKDAYS[day]]} ({start.strftime('%d/%m')})"
-    if "proxima" in day:
+    if "próxima" in day:
         start = midnight + timedelta(days=7 - now.weekday())
-        return start, start + timedelta(days=7), "a proxima semana"
+        return start, start + timedelta(days=7), "a próxima semana"
     return now, midnight + timedelta(days=7 - now.weekday()), "esta semana"
 
 
@@ -117,7 +117,7 @@ def _do_agenda(params: Dict[str, Any], owner: str) -> str:
     text = f"Agenda para {label}:\n{agenda.format_events(events, with_day=multi_day)}"
     conflicts = agenda.find_conflicts(events)
     if conflicts:
-        text += f"\n\nAtencao: {len(conflicts)} conflito(s) de horario."
+        text += f"\n\nAtencao: {len(conflicts)} conflito(s) de horário."
     return text
 
 
@@ -133,50 +133,50 @@ def _do_conflicts(params: Dict[str, Any], owner: str) -> str:
 def _do_free_slot(params: Dict[str, Any], owner: str) -> str:
     minutes = _minutes(params)
     when = params.get("when", "semana")
-    start, end, label = _day_range({"hoje": "hoje", "amanha": "amanha", "proxima semana": "proxima semana"}.get(when, "esta semana"))
+    start, end, label = _day_range({"hoje": "hoje", "amanha": "amanha", "próxima semana": "próxima semana"}.get(when, "esta semana"))
     if end - start < timedelta(days=1) and when == "semana":
-        start, end, label = _day_range("proxima semana")
+        start, end, label = _day_range("próxima semana")
     slots = agenda.free_slots(agenda.events_between(owner, start, end), start, end, minutes)
     if not slots:
-        return f"Nao encontrei {minutes} minutos livres em {label}, no horario comercial."
+        return f"Não encontrei {minutes} minutos livres em {label}, no horário comercial."
     lines = [f"- {a.strftime('%d/%m')} ({_WEEKDAY_NAMES[a.weekday()]}) {a.strftime('%H:%M')}-{b.strftime('%H:%M')}" for a, b in slots]
-    return f"Horarios livres de pelo menos {minutes} minutos em {label}:\n" + "\n".join(lines)
+    return f"Horários livres de pelo menos {minutes} minutos em {label}:\n" + "\n".join(lines)
 
 
 def _do_brief(owner: str) -> str:
     now = agenda.now_local()
     greeting = "Bom dia" if now.hour < 12 else ("Boa tarde" if now.hour < 18 else "Boa noite")
-    parts = [f"{greeting}. Hoje e {_WEEKDAY_NAMES[now.weekday()]}, {now.strftime('%d/%m/%Y, %H:%M')}."]
+    parts = [f"{greeting}. Hoje é {_WEEKDAY_NAMES[now.weekday()]}, {now.strftime('%d/%m/%Y, %H:%M')}."]
     try:
         midnight = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo) + timedelta(days=1)
         events = agenda.events_between(owner, now, midnight)
         parts.append(f"Compromissos restantes hoje:\n{agenda.format_events(events)}" if events else "Sem compromissos restantes hoje.")
         conflicts = agenda.find_conflicts(events)
         if conflicts:
-            parts.append(f"Ha {len(conflicts)} conflito(s) de horario.")
+            parts.append(f"Há {len(conflicts)} conflito(s) de horário.")
     except Exception:
-        parts.append("Nao consegui consultar a agenda agora.")
+        parts.append("Não consegui consultar a agenda agora.")
     pending = policy.list_approvals(owner)
     if pending:
-        parts.append(f"{len(pending)} acao(oes) aguardando sua aprovacao.")
+        parts.append(f"{len(pending)} ação(oes) aguardando sua aprovação.")
     candidates = learning.list_candidates(owner)
     if candidates:
-        parts.append(f"{len(candidates)} item(ns) aguardando revisao na memoria.")
+        parts.append(f"{len(candidates)} item(ns) aguardando revisão na memória.")
     return "\n\n".join(parts)
 
 
 def _do_recall(params: Dict[str, Any], owner: str) -> str:
     hits = memory.search(params["topic"], owner=owner, k=5, touch=True)
     if not hits:
-        return f"Nao tenho nada guardado sobre {params['topic']}."
+        return f"Não tenho nada guardado sobre {params['topic']}."
     return "O que tenho guardado:\n" + "\n".join(f"- {h['text']}" for h in hits)
 
 
 def _do_approvals(owner: str) -> str:
     pending = policy.list_approvals(owner)
     if not pending:
-        return "Nenhuma acao aguardando aprovacao."
-    return "Aguardando sua aprovacao:\n" + "\n".join(f"- {p['summary']}" for p in pending[:10])
+        return "Nenhuma ação aguardando aprovação."
+    return "Aguardando sua aprovação:\n" + "\n".join(f"- {p['summary']}" for p in pending[:10])
 
 
 def _do_learn(text: str, owner: str) -> Optional[str]:
@@ -184,11 +184,11 @@ def _do_learn(text: str, owner: str) -> Optional[str]:
     if result["remembered"]:
         entry = result["remembered"][0]
         if entry["action"] == "conflict":
-            return f"Guardado, mas isso conflita com: \"{entry['conflicts'][0]['text']}\". Qual esta correto?"
-        return "Ja estava guardado." if entry["action"] == "duplicate" else f"Entendido, vou lembrar: {entry['item']['text']}"
+            return f"Guardado, mas isso conflita com: \"{entry['conflicts'][0]['text']}\". Qual está correto?"
+        return "Já estava guardado." if entry["action"] == "duplicate" else f"Entendido, vou lembrar: {entry['item']['text']}"
     if result["forgotten"]:
         return "Pronto, esqueci."
-    return None if result["candidates"] else "Nao encontrei nada correspondente para esquecer."
+    return None if result["candidates"] else "Não encontrei nada correspondente para esquecer."
 
 
 def _do_routine(params: Dict[str, Any], owner: str) -> str:
@@ -196,7 +196,7 @@ def _do_routine(params: Dict[str, Any], owner: str) -> str:
     mission = missions.create(owner, params["title"], [{"title": "Consultar agenda", "handler": "agenda.brief"},
                                                        {"title": "Notificar", "handler": "notify", "params": {"title": params["title"], "from_step": 0}, "depends_on": [0]}],
                               cron=params["cron"], tz=config.get("timezone", "America/Sao_Paulo"))
-    return f"Rotina criada: {params['title']}. Proxima execucao em {_local(mission['next_run_at'])}."
+    return f"Rotina criada: {params['title']}. Próxima execução em {_local(mission['next_run_at'])}."
 
 
 def _do_monitor_mail(params: Dict[str, Any], owner: str) -> str:
@@ -207,7 +207,7 @@ def _do_monitor_mail(params: Dict[str, Any], owner: str) -> str:
                     [{"title": "Verificar e-mails novos", "handler": "gmail.important", "params": step_params},
                      {"title": "Notificar", "handler": "notify", "params": {"title": "E-mails", "from_step": 0}, "depends_on": [0]}],
                     cron="*/15 * * * *", tz=config.get("timezone", "America/Sao_Paulo"))
-    return "Vou verificar a cada 15 minutos e avisar sobre os importantes. Nada sera respondido sem sua aprovacao."
+    return "Vou verificar a cada 15 minutos e avisar sobre os importantes. Nada será respondido sem sua aprovação."
 
 
 def _local(iso: Optional[str]) -> str:
@@ -226,16 +226,16 @@ async def _do_device(text: str, owner: str) -> Optional[str]:
         await home.execute(device, cmd["op"], cmd["value"], owner=owner)
         return f"Feito: {device['name']}."
     except policy.ApprovalRequired:
-        return f"Essa acao em {device['name']} precisa da sua aprovacao. Confirme no painel do Jarvis."
+        return f"Essa ação em {device['name']} precisa da sua aprovação. Confirme no painel do Jarvis."
     except policy.ActionDenied:
-        return f"A politica atual nao permite essa acao em {device['name']}."
+        return f"A política atual não permite essa ação em {device['name']}."
     except home.UnsafeAction as exc:
-        return f"Nao executei: {exc}."
+        return f"Não executei: {exc}."
     except home.HomeNotConfigured:
-        return "O Home Assistant ainda nao esta configurado."
+        return "O Home Assistant ainda não está configurado."
     except Exception as exc:
         audit.record("home.control", owner=owner, risk="reversible", outcome="error", error=str(exc)[:200])
-        return f"Nao consegui falar com o dispositivo {device['name']}."
+        return f"Não consegui falar com o dispositivo {device['name']}."
 
 
 async def handle(text: str, owner: Optional[str] = "") -> Optional[Dict[str, Any]]:

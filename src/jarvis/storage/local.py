@@ -23,7 +23,7 @@ class LocalBackend(StorageBackend):
     def _path(self, key: str) -> Path:
         path = (self.root / validate_key(key)).resolve()
         if self.root not in path.parents:
-            raise StorageError("chave fora do diretorio de objetos")
+            raise StorageError("chave fora do diretório de objetos")
         return path
 
     def put_bytes(self, key: str, data: bytes, metadata: Optional[Dict[str, str]] = None) -> ObjectInfo:
@@ -42,7 +42,7 @@ class LocalBackend(StorageBackend):
     def get_bytes(self, key: str) -> bytes:
         path = self._path(key)
         if not path.is_file():
-            raise StorageError(f"objeto nao encontrado: {key}")
+            raise StorageError(f"objeto não encontrado: {key}")
         data = path.read_bytes()
         info = self.head(key)
         if info and info.sha256 and info.sha256 != hashlib.sha256(data).hexdigest():

@@ -39,7 +39,7 @@ ANA = {"x-user": "ana"}
 def test_every_route_rejects_anonymous_except_google_login(app, client):
     from fastapi.routing import APIRoute
     from routes.jarvis_routes import setup_jarvis_routes
-    public = {"/api/jarvis/google/login", "/api/jarvis/google/login/callback"}
+    public = {"/api/jarvis/google/login", "/api/jarvis/google/login/callback", "/api/jarvis/google/login-available"}
     checked = 0
     for route in setup_jarvis_routes().routes:
         if isinstance(route, APIRoute) and route.path.startswith("/api/jarvis") and route.path not in public:
@@ -109,7 +109,7 @@ def test_approval_cross_owner_and_flow(client):
 def test_email_scheduling_returns_awaiting_approval(client):
     out = client.post("/api/jarvis/gmail/outbox", headers=ADMIN, json={"to": ["b@x.com"], "subject": "s", "body": "c"}).json()
     assert out["status"] == "awaiting_approval"
-    assert client.post("/api/jarvis/gmail/outbox", headers=ADMIN, json={"to": ["invalido"], "subject": "s", "body": "c"}).status_code == 400
+    assert client.post("/api/jarvis/gmail/outbox", headers=ADMIN, json={"to": ["inválido"], "subject": "s", "body": "c"}).status_code == 400
 
 
 def test_google_not_configured_is_503_not_500(client, monkeypatch):
@@ -155,7 +155,7 @@ def test_voice_requires_input_and_answers_text(client, monkeypatch):
 def test_routine_commands_create_persistent_missions():
     import asyncio
     out = asyncio.run(intents.handle("Jarvis, todos os dias às 8 horas me informe meus compromissos", "ana"))
-    assert out["intent"] == "routine" and "Proxima execucao" in out["text"]
+    assert out["intent"] == "routine" and "Próxima execução" in out["text"]
     mission = missions.list_missions("ana")[0]
     assert mission["cron"] == "0 8 * * *" and [s["handler"] for s in mission["steps"]] == ["agenda.brief", "notify"]
     assert asyncio.run(intents.handle("Jarvis, toda segunda-feira às 9 me mostre minha agenda", "bob"))["intent"] == "routine"
@@ -195,7 +195,7 @@ def test_agent_mission_limited_to_catalog():
 
 def test_agent_bad_input_is_reported():
     import asyncio
-    assert asyncio.run(do_jarvis_action("nao json", owner="ana"))["exit_code"] == 1
+    assert asyncio.run(do_jarvis_action("não json", owner="ana"))["exit_code"] == 1
     assert _agent({"action": "formatar_disco"})["exit_code"] == 1
 
 

@@ -46,7 +46,7 @@ class BackupError(RuntimeError):
 
 def _derive_key(passphrase: str, salt: bytes) -> bytes:
     if len(passphrase or "") < MIN_PASSPHRASE:
-        raise BackupError(f"a chave de recuperacao precisa de pelo menos {MIN_PASSPHRASE} caracteres")
+        raise BackupError(f"a chave de recuperação precisa de pelo menos {MIN_PASSPHRASE} caracteres")
     return Scrypt(salt=salt, length=32, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P).derive(passphrase.encode("utf-8"))
 
 
@@ -77,7 +77,7 @@ def decrypt_file(src: Path, dst: Path, passphrase: str) -> None:
     with open(src, "rb") as fin, open(dst, "wb") as fout:
         os.fchmod(fout.fileno(), 0o600)
         if fin.read(len(MAGIC)) != MAGIC:
-            raise BackupError("arquivo nao e um backup do Jarvis")
+            raise BackupError("arquivo não é um backup do Jarvis")
         salt, base = fin.read(16), fin.read(4)
         aead = AESGCM(_derive_key(passphrase, salt))
         counter = 0
@@ -206,7 +206,7 @@ def create_backup(out_path: Path, passphrase: str, *, data_dir: Path, env_file: 
                   chroma_client: Any = None, repo: Optional[Path] = None) -> Dict[str, Any]:
     out_path, data_dir = Path(out_path), Path(data_dir)
     if data_dir.resolve() in out_path.resolve().parents:
-        raise BackupError("o backup nao pode ficar dentro do diretorio de dados")
+        raise BackupError("o backup não pode ficar dentro do diretório de dados")
     _derive_key(passphrase, b"\0" * 16)  # fail early on a weak passphrase
     with tempfile.TemporaryDirectory(prefix="jarvis-backup-") as tmpdir:
         tmp, files, sqlite_files = Path(tmpdir), [], []
@@ -279,7 +279,7 @@ def _open_payload(path: Path, passphrase: str, workdir: Path) -> Dict[str, Any]:
             if result != "ok":
                 problems.append(f"sqlite corrompido: {rel}")
         except sqlite3.Error as exc:
-            problems.append(f"sqlite ilegivel: {rel}: {exc}")
+            problems.append(f"sqlite ilegível: {rel}: {exc}")
     if problems:
         raise BackupError("; ".join(problems[:10]))
     return {"manifest": manifest, "root": extract}
@@ -304,7 +304,7 @@ def restore_backup(path: Path, passphrase: str, *, data_dir: Path, env_target: O
         root: Path = result["root"]
         if data_dir.exists() and any(data_dir.iterdir()):
             if not force:
-                raise BackupError(f"{data_dir} nao esta vazio; use force para mover o conteudo atual para o lado")
+                raise BackupError(f"{data_dir} não está vazio; use force para mover o conteúdo atual para o lado")
             moved_to = data_dir.with_name(f"{data_dir.name}.pre-restore-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
             data_dir.rename(moved_to)
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +322,7 @@ def restore_backup(path: Path, passphrase: str, *, data_dir: Path, env_target: O
         if env_target and (root / "env" / ".env").is_file():
             env_target = Path(env_target)
             if env_target.exists() and not force:
-                raise BackupError(f"{env_target} ja existe; use force")
+                raise BackupError(f"{env_target} já existe; use force")
             if env_target.exists():
                 shutil.copy2(env_target, env_target.with_name(env_target.name + ".pre-restore"))
             shutil.copy2(root / "env" / ".env", env_target)
@@ -368,7 +368,7 @@ def validate_restored(data_dir: Path) -> Dict[str, Any]:
                     bad += 1
             report["encrypted_keys"] = {"readable": ok, "unreadable": bad}
             if bad:
-                report["problems"].append(f"{bad} chave(s) de API nao abrem com a .app_key restaurada")
+                report["problems"].append(f"{bad} chave(s) de API não abrem com a .app_key restaurada")
         except sqlite3.Error:
             pass
         finally:

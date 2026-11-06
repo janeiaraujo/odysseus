@@ -71,7 +71,7 @@ def list_devices(owner: Optional[str] = "") -> List[Dict[str, Any]]:
 def upsert_device(owner: Optional[str], *, name: str, entity_id: str, domain: Optional[str] = None, area: str = "",
                   aliases: Optional[List[str]] = None, critical: bool = False, source: str = "manual") -> Dict[str, Any]:
     if not re.fullmatch(r"[a-z_]+\.[a-z0-9_]+", entity_id or ""):
-        raise ValueError("entity_id invalido")
+        raise ValueError("entity_id inválido")
     with session_scope() as db:
         row = db.query(Device).filter(Device.owner == (owner or ""), Device.entity_id == entity_id).first()
         if row is None:
@@ -94,14 +94,14 @@ def build_action(device: Dict[str, Any], op: str, value: Any = None) -> Action:
         raise UnsafeAction("dispositivo desativado")
     entry = _OPS.get(device["domain"], {}).get(op)
     if entry is None:
-        raise UnsafeAction(f"operacao '{op}' nao permitida para {device['domain']}")
+        raise UnsafeAction(f"operacao '{op}' não permitida para {device['domain']}")
     service, risk = entry
     data: Dict[str, Any] = {}
     if op == "set_temperature":
         try:
             temperature = float(value)
         except (TypeError, ValueError):
-            raise UnsafeAction("temperatura invalida") from None
+            raise UnsafeAction("temperatura inválida") from None
         if not TEMP_RANGE[0] <= temperature <= TEMP_RANGE[1]:
             raise UnsafeAction(f"temperatura fora da faixa segura ({TEMP_RANGE[0]:.0f}-{TEMP_RANGE[1]:.0f} graus)")
         data["temperature"] = temperature
@@ -161,7 +161,7 @@ def status() -> Dict[str, Any]:
 def _client(transport: Any = None) -> httpx.AsyncClient:
     home = config.get("home", {}) or {}
     if not home.get("url") or not home.get("token_enc"):
-        raise HomeNotConfigured("Home Assistant nao configurado")
+        raise HomeNotConfigured("Home Assistant não configurado")
     return httpx.AsyncClient(base_url=home["url"], timeout=15, transport=transport,
                              headers={"Authorization": f"Bearer {decrypt(home['token_enc'])}"})
 
@@ -201,7 +201,7 @@ def _approved_executor(owner: str, payload: Dict[str, Any]) -> Any:
     """Rebuild from the device table at approval time, so a stored payload can't widen scope."""
     device = next((d for d in list_devices(owner) if d["id"] == payload.get("device_id")), None)
     if device is None:
-        raise LookupError("dispositivo nao encontrado")
+        raise LookupError("dispositivo não encontrado")
     return _call(build_action(device, payload.get("op", ""), payload.get("value")))
 
 

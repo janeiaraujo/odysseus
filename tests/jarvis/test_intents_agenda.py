@@ -109,13 +109,13 @@ def test_brief_survives_calendar_failure(monkeypatch):
     monkeypatch.setattr(agenda, "events_between", boom)
     policy.request_approval("gmail.send", policy.EXTERNAL, "ana", "enviar relatorio", {})
     text = _run("Jarvis, bom dia")["text"]
-    assert "Nao consegui consultar" in text and "aguardando sua aprovacao" in text
+    assert "Não consegui consultar" in text and "aguardando sua aprovação" in text
 
 
 def test_remember_and_recall_round_trip():
     assert "vou lembrar" in _run("Jarvis, lembre que prefiro respostas em português.")["text"]
     assert "portugues" in memory.normalize(_run("o que você sabe sobre respostas")["text"])
-    assert "Ja estava" in _run("Jarvis, lembre que prefiro respostas em português.")["text"]
+    assert "Já estava" in _run("Jarvis, lembre que prefiro respostas em português.")["text"]
 
 
 def test_disabled_config_returns_none():
@@ -199,7 +199,7 @@ def test_home_token_encrypted_at_rest(devices):
 
 def test_device_intent_reports_pending_approval_and_never_acts(devices):
     out = _run("Jarvis, destranque a porta da frente")
-    assert "aprovacao" in out["text"] and policy.list_approvals("ana")
+    assert "aprovação" in out["text"] and policy.list_approvals("ana")
 
 
 def test_device_of_another_owner_is_not_reachable(devices):

@@ -194,9 +194,9 @@ def remember(text: str, *, owner: Optional[str] = "", kind: str = "semantic", ca
     """Store a memory. Returns {"action": created|duplicate|conflict, "item", "conflicts"}."""
     text = (text or "").strip()
     if not text:
-        raise ValueError("memoria vazia")
+        raise ValueError("memória vazia")
     if kind not in KINDS:
-        raise ValueError(f"tipo de memoria invalido: {kind}")
+        raise ValueError(f"tipo de memória inválido: {kind}")
     owner = owner or ""
     untrusted = source_type in UNTRUSTED_SOURCES
     trust = "untrusted" if untrusted else ("user" if source_type in ("user", "import") else "derived")
@@ -259,7 +259,7 @@ def _owned(db, memory_id: str, owner: Optional[str]) -> MemoryItem:
         q = q.filter(MemoryItem.owner == (owner or ""))
     row = q.first()
     if row is None:
-        raise LookupError("memoria nao encontrada")
+        raise LookupError("memória não encontrada")
     return row
 
 
@@ -268,11 +268,11 @@ def get(memory_id: str, owner: Optional[str] = "") -> Dict[str, Any]:
         return to_dict(_owned(db, memory_id, owner))
 
 
-def correct(memory_id: str, new_text: str, *, owner: Optional[str] = "", reason: str = "correcao do usuario") -> Dict[str, Any]:
+def correct(memory_id: str, new_text: str, *, owner: Optional[str] = "", reason: str = "correção do usuário") -> Dict[str, Any]:
     """User correction: new version, status back to fact, conflict links cleared."""
     new_text = (new_text or "").strip()
     if not new_text:
-        raise ValueError("memoria vazia")
+        raise ValueError("memória vazia")
     with session_scope() as db:
         row = _owned(db, memory_id, owner)
         row.version, row.text, row.norm_hash = (row.version or 1) + 1, new_text, content_hash(new_text)

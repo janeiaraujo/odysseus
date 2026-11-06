@@ -80,7 +80,7 @@ class FirestoreClient:
             return cls(project or "demo-jarvis", emulator_host=emulator)
         path = fb.get("credentials_file") or os.environ.get("JARVIS_FIREBASE_CREDENTIALS", "")
         if not path or not os.path.isfile(path):
-            raise FirebaseNotConfigured("arquivo de conta de servico do Firebase nao configurado")
+            raise FirebaseNotConfigured("arquivo de conta de servico do Firebase não configurado")
         with open(path, encoding="utf-8") as f:
             credentials = json.load(f)
         return cls(project or credentials.get("project_id", ""), credentials=credentials)
@@ -145,7 +145,7 @@ class FirestoreClient:
     async def send_push(self, device_token: str, title: str, body: str) -> None:
         """Firebase Cloud Messaging HTTP v1."""
         if self._emulator:
-            raise FirebaseNotConfigured("FCM nao existe no emulador")
+            raise FirebaseNotConfigured("FCM não existe no emulador")
         url = f"https://fcm.googleapis.com/v1/projects/{self.project_id}/messages:send"
         resp = await self._request("POST", url, json={"message": {"token": device_token, "notification": {"title": title, "body": body}}})
         resp.raise_for_status()

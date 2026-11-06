@@ -46,7 +46,7 @@ def schedule(owner: str, *, to: List[str], subject: str, body: str, send_at: Opt
     """Queue a message. The same idempotency key returns the existing row."""
     bad = [a for a in (to or []) + (cc or []) if not _ADDRESS.match(a)]
     if not to or bad:
-        raise ValueError("destinatario invalido")
+        raise ValueError("destinatário inválido")
     zone = ZoneInfo(tz)  # raises on an unknown zone
     moment = send_at or datetime.now(timezone.utc)
     moment = (moment if moment.tzinfo else moment.replace(tzinfo=zone)).astimezone(timezone.utc).replace(tzinfo=None)
@@ -65,7 +65,7 @@ def schedule(owner: str, *, to: List[str], subject: str, body: str, send_at: Opt
         db.flush()
         row_id = row.id
     if decision.mode == policy.CONFIRM:
-        approval = policy.request_approval("gmail.send", policy.EXTERNAL, owner, f"Enviar e-mail '{subject}' para {len(to)} destinatario(s)", {"outbound_id": row_id})
+        approval = policy.request_approval("gmail.send", policy.EXTERNAL, owner, f"Enviar e-mail '{subject}' para {len(to)} destinatário(s)", {"outbound_id": row_id})
         with session_scope() as db:
             db.get(OutboundEmail, row_id).approval_id = approval
     audit.record("gmail.schedule", owner=owner, risk="external", target=row_id, status=decision.mode)
@@ -76,7 +76,7 @@ def get(owner: str, row_id: str) -> Dict[str, Any]:
     with session_scope() as db:
         row = db.query(OutboundEmail).filter(OutboundEmail.id == row_id, OutboundEmail.owner == owner).first()
         if row is None:
-            raise LookupError("e-mail nao encontrado")
+            raise LookupError("e-mail não encontrado")
         return _view(row)
 
 
@@ -89,7 +89,7 @@ def _approved(owner: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     with session_scope() as db:
         updated = db.query(OutboundEmail).filter(OutboundEmail.id == payload.get("outbound_id"), OutboundEmail.owner == owner, OutboundEmail.status == "awaiting_approval").update({"status": "queued"})
     if not updated:
-        raise LookupError("e-mail nao esta aguardando aprovacao")
+        raise LookupError("e-mail não está aguardando aprovação")
     return {"queued": payload["outbound_id"]}
 
 

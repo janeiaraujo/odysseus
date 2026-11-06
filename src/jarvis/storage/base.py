@@ -46,7 +46,7 @@ class ObjectInfo:
 
 def validate_key(key: str) -> str:
     if not key or key.startswith("/") or ".." in key.split("/") or "\\" in key or "\0" in key:
-        raise StorageError("chave de objeto invalida")
+        raise StorageError("chave de objeto inválida")
     if len(key.encode("utf-8")) > MAX_KEY_BYTES:
         raise StorageError(f"chave maior que {MAX_KEY_BYTES} bytes")
     return key

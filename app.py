@@ -215,6 +215,7 @@ if AUTH_ENABLED:
         # Google sign-in: only accounts already linked to a user can get a session.
         "/api/jarvis/google/login",
         "/api/jarvis/google/login/callback",
+        "/api/jarvis/google/login-available",
     }
     AUTH_EXEMPT_PREFIXES = ["/static"]
     # Dynamic paths whose own handler proves identity via a path-embedded

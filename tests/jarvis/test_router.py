@@ -165,7 +165,7 @@ def test_openrouter_pricing_refresh_with_mock():
 
 def test_persona_is_static_ptbr_and_can_be_disabled():
     text = persona.system_preface()
-    assert "J.A.R.V.I.S." in text and "portugues do Brasil" in text
+    assert "J.A.R.V.I.S." in text and "português do Brasil" in text
     assert persona.system_preface() == text
     config.update_config({"persona": {"enabled": False}})
     assert persona.system_preface() == ""

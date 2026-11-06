@@ -223,7 +223,7 @@ def test_cost_comparison_never_claims_free_storage():
     out = compare_costs(5_000_000)
     assert out["zero_byte"]["class_a"] == 5_000_000 and out["zero_byte"]["write_cost_usd"] == 18.0
     assert out["batched"]["class_a"] == 5000 and out["batched"]["write_cost_usd"] == 0
-    assert "nao documentado" in out["zero_byte"]["storage_cost"] and out["recommendation"] == "batched"
+    assert "não documentado" in out["zero_byte"]["storage_cost"] and out["recommendation"] == "batched"
 
 
 def test_benchmark_measures_and_cleans_up(backend):
