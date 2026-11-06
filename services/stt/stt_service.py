@@ -98,7 +98,10 @@ class STTService:
                 tmp.write(audio_bytes)
                 tmp_path = tmp.name
 
-            kwargs = {}
+            # hotwords: the assistant's name is not a Portuguese word, so without this it
+            # comes out as "já vi". vad_filter: on noise alone Whisper invents phrases such
+            # as "Tchau.", and conversation mode would send them to the chat as if spoken.
+            kwargs = {"hotwords": "Jarvis", "vad_filter": True}
             if language:
                 kwargs["language"] = language
 

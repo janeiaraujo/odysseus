@@ -238,7 +238,8 @@ function encodeWav(chunks, sampleRate) {
  * Local voice detection on raw samples, keeping about a second of audio from before
  * speech starts: without it the start of a phrase, which is exactly the wake word,
  * would be lost. Audio only leaves the browser when speech was detected.
- * `threshold()` lets callers demand a louder voice, e.g. while the assistant talks.
+ * `floorMultiplier()` lets callers demand a louder voice, e.g. while the assistant talks,
+ * or return null to stop listening.
  */
 async function createDetector(stream, onSegment, { floorMultiplier = () => 3, onSpeech = () => {}, onLevel = () => {} } = {}) {
   const ctx = new AudioContext();
@@ -255,8 +256,10 @@ async function createDetector(stream, onSegment, { floorMultiplier = () => 3, on
   const silenceBlocks = Math.ceil(1.2 / blockSeconds);
   const maxBlocks = Math.ceil(30 / blockSeconds);
   const preRoll = [];
+  const minVoicedBlocks = Math.ceil(0.25 / blockSeconds);
   let speech = null;
   let quiet = 0;
+  let voiced = 0;
   let floor = 0.003; // room noise, learned while nobody is talking: mics differ a lot
   processor.onaudioprocess = (event) => {
     const block = new Float32Array(event.inputBuffer.getChannelData(0));
@@ -275,6 +278,7 @@ async function createDetector(stream, onSegment, { floorMultiplier = () => 3, on
         speech = [...preRoll, block];
         preRoll.length = 0;
         quiet = 0;
+        voiced = 1;
       } else {
         floor += (energy - floor) * 0.05;
         preRoll.push(block);
@@ -283,11 +287,13 @@ async function createDetector(stream, onSegment, { floorMultiplier = () => 3, on
       return;
     }
     speech.push(block);
-    quiet = energy > Math.max(0.005, floor * 2) ? 0 : quiet + 1;
+    const isVoice = energy > Math.max(0.005, floor * 2);
+    quiet = isVoice ? 0 : quiet + 1;
+    if (isVoice) voiced += 1;
     if (quiet >= silenceBlocks || speech.length >= maxBlocks) {
-      const blob = encodeWav(speech, ctx.sampleRate);
+      const blob = voiced >= minVoicedBlocks ? encodeWav(speech, ctx.sampleRate) : null;
       speech = null;
-      onSegment(blob);
+      if (blob) onSegment(blob); // a click or a cough never reaches the transcriber
     }
   };
   return ctx;
@@ -775,7 +781,7 @@ async function refreshAttention() {
 }
 
 // ---- Modo conversa: falar e ouvir no próprio chat, com todas as ferramentas do agente ----
-const talk = { active: false, state: 'off', stream: null, ctx: null, audio: null, recognizer: null, waitingReply: false };
+const talk = { active: false, state: 'off', stream: null, ctx: null, audio: null, recognizer: null, waitingReply: false, replyTimer: null, audioWatchdog: null };
 const TALK_LABEL = { ouvindo: 'Ouvindo...', transcrevendo: 'Entendendo...', pensando: 'Pensando...', falando: 'Falando... (fale para interromper)' };
 
 function talkStatus(state, text) {
@@ -846,6 +852,12 @@ function talkSend(text) {
   box.dispatchEvent(new Event('input', { bubbles: true }));
   talk.waitingReply = true;
   talkStatus('pensando');
+  clearTimeout(talk.replyTimer);
+  talk.replyTimer = setTimeout(() => { // provider down or send refused: don't stay deaf forever
+    if (!talk.active || !talk.waitingReply) return;
+    talk.waitingReply = false;
+    talkStatus('ouvindo', 'A resposta demorou demais. Continue falando.');
+  }, 180000);
   form.requestSubmit();
 }
 
@@ -883,11 +895,18 @@ async function startTalk() {
       talkStatus('off', err.name === 'NotAllowedError' ? 'Permita o microfone no navegador e tente de novo.' : `Microfone indisponível: ${err.name}`);
       return;
     }
+    // Chrome can report a running AudioContext whose clock is frozen (no usable sound output).
+    // Nothing would ever be heard, so say it instead of showing a misleading "Ouvindo".
+    talk.audioWatchdog = setTimeout(() => {
+      if (talk.active) talkStatus('ouvindo', 'O áudio do navegador não iniciou. Verifique a saída de som do sistema e recarregue a página.');
+    }, 4000);
     talk.ctx = await createDetector(talk.stream, talkSegment, {
       // While it talks only a clearly louder voice counts, so its own audio doesn't trigger it.
       floorMultiplier: () => (talk.state === 'falando' ? 12 : talk.state === 'ouvindo' ? 3 : null),
       onSpeech: () => { if (talk.state === 'falando') { stopTalkAudio(); talkStatus('ouvindo'); } },
       onLevel: (energy) => {
+        clearTimeout(talk.audioWatchdog);
+        talk.audioWatchdog = null;
         const bar = document.getElementById('jarvis-talk-level');
         if (bar) bar.style.width = `${Math.min(100, Math.round(Math.sqrt(energy) * 220))}%`;
       },
@@ -908,6 +927,8 @@ async function startTalk() {
 function stopTalk() {
   talk.active = false;
   talk.waitingReply = false;
+  clearTimeout(talk.replyTimer);
+  clearTimeout(talk.audioWatchdog);
   const recognizer = talk.recognizer;
   talk.recognizer = null;
   recognizer?.stop();
@@ -946,6 +967,7 @@ function initConversationMode() {
   document.addEventListener('jarvis:assistant-done', (event) => {
     if (!talk.active || !talk.waitingReply) return;
     talk.waitingReply = false;
+    clearTimeout(talk.replyTimer);
     talkSpeak(event.detail?.text);
   });
 }
