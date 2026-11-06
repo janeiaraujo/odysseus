@@ -54,6 +54,21 @@ async def list_items(owner: str, session_id: str, account_id: Optional[str] = No
             return items
 
 
+async def fetch_image(owner: str, session_id: str, item_id: str, *, size: int = 512, account_id: Optional[str] = None) -> Dict[str, Any]:
+    """Bytes of one picked photo. The URL comes from Google's list for this session, never from a caller."""
+    account_id = account_id or default_account(owner, "photos")
+    item = next((i for i in await list_items(owner, session_id, account_id) if i["id"] == item_id), None)
+    if item is None:
+        raise LookupError("foto não encontrada nesta sessão")
+    if not item.get("mime", "").startswith("image/"):
+        raise ValueError("apenas fotos têm miniatura")
+    size = max(64, min(int(size), 2048))
+    resp = await google_request("GET", f"{item['base_url']}=w{size}-h{size}", account_id=account_id, owner=owner)
+    if resp.status_code >= 400:
+        raise GoogleApiError(f"Google Photos respondeu {resp.status_code} ao baixar a foto")
+    return {"content": resp.content, "mime": item["mime"]}
+
+
 async def delete_session(owner: str, session_id: str, account_id: Optional[str] = None) -> None:
     account_id = account_id or default_account(owner, "photos")
     await google_request("DELETE", f"{API}/sessions/{session_id}", account_id=account_id, owner=owner)
