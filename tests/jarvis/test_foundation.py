@@ -106,3 +106,30 @@ def test_expired_approval_cannot_be_decided():
     with pytest.raises(LookupError):
         asyncio.run(policy.decide(approval_id, True, owner="ana"))
     assert policy.list_approvals("ana") == []
+
+
+def test_config_cache_sees_external_changes_and_callers_cannot_corrupt_it(jarvis_env):
+    import os
+    config.update_config({"router": {"profile": "local"}})
+    copy_of_config = config.load_config()
+    copy_of_config["router"]["profile"] = "alterado"
+    assert config.get("router.profile") == "local"
+    path = config.JARVIS_CONFIG_FILE
+    stored = json.loads(open(path).read())
+    stored["router"]["profile"] = "economico"
+    open(path, "w").write(json.dumps(stored))
+    os.utime(path, ns=(1, 1))  # another process wrote it
+    assert config.get("router.profile") == "economico"
+
+
+def test_rank_is_fast_with_a_large_catalog(jarvis_env, monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from src.jarvis import router
+    config.update_config({"pricing": {f"m{i}": {"input_per_mtok": 1, "output_per_mtok": 1} for i in range(500)}})
+    models = json.dumps([f"org/model-{i}" for i in range(500)])
+    ep = SimpleNamespace(id="e", name="E", base_url="https://openrouter.ai/api/v1", cached_models=models, hidden_models=None, pinned_models=None, model_type="llm", endpoint_kind="auto", supports_tools=None)
+    monkeypatch.setattr(router, "_configured_chain", lambda owner: set())
+    started = time.perf_counter()
+    router.rank(endpoints=[ep], include_unavailable=True)
+    assert time.perf_counter() - started < 2

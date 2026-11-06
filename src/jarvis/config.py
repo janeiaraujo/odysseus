@@ -23,6 +23,7 @@ DEFAULTS: Dict[str, Any] = {
         "free_model_patterns": [":free$", "^openrouter/free$"],
         "paid_model_allowlist": [],
         "rate_limit_rpm": {},
+        "auto_chat": {},
         "quality_overrides": {},
     },
     "budget": {"monthly_usd": 0.0, "block_paid_when_exceeded": True},
@@ -46,6 +47,8 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 _lock = threading.RLock()
+_cache_key: Any = None
+_cache_value: Any = None
 
 
 def _deep_merge(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -58,22 +61,38 @@ def _deep_merge(base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def load_config() -> Dict[str, Any]:
+def _read() -> Dict[str, Any]:
+    """Merged config, re-parsed only when the file changes. Callers must not mutate it."""
+    global _cache_key, _cache_value
     try:
-        with open(JARVIS_CONFIG_FILE, "r", encoding="utf-8") as f:
-            stored = json.load(f)
-        if not isinstance(stored, dict):
+        info = os.stat(JARVIS_CONFIG_FILE)
+        stamp = (JARVIS_CONFIG_FILE, info.st_mtime_ns, info.st_size)
+    except OSError:
+        stamp = (JARVIS_CONFIG_FILE, 0, 0)
+    key = (stamp, os.environ.get("JARVIS_FIREBASE_ENABLED", "").strip().lower())
+    with _lock:
+        if key == _cache_key and _cache_value is not None:
+            return _cache_value
+        try:
+            with open(JARVIS_CONFIG_FILE, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+            if not isinstance(stored, dict):
+                stored = {}
+        except (OSError, ValueError):
             stored = {}
-    except (OSError, ValueError):
-        stored = {}
-    merged = _deep_merge(DEFAULTS, stored)
-    if os.environ.get("JARVIS_FIREBASE_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
-        merged["firebase"]["enabled"] = True  # deployment switch, in .env with the credentials
-    return merged
+        merged = _deep_merge(DEFAULTS, stored)
+        if key[1] in ("1", "true", "yes", "on"):
+            merged["firebase"]["enabled"] = True  # deployment switch, in .env with the credentials
+        _cache_key, _cache_value = key, merged
+        return merged
+
+
+def load_config() -> Dict[str, Any]:
+    return copy.deepcopy(_read())
 
 
 def get(path: str, default: Any = None) -> Any:
-    node: Any = load_config()
+    node: Any = _read()
     for part in path.split("."):
         if not isinstance(node, dict) or part not in node:
             return default
@@ -82,8 +101,10 @@ def get(path: str, default: Any = None) -> Any:
 
 
 def update_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    global _cache_value
     with _lock:
         merged = _deep_merge(load_config(), patch or {})
         os.makedirs(os.path.dirname(JARVIS_CONFIG_FILE), exist_ok=True)
         atomic_write_json(JARVIS_CONFIG_FILE, merged)
+        _cache_value = None
         return merged
