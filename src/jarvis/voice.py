@@ -18,7 +18,8 @@ from src.jarvis.db import session_scope
 from src.jarvis.models import VoiceTurn
 
 logger = logging.getLogger(__name__)
-_WAKE = re.compile(r"^\W*(?:ei\s+|ok\s+|hey\s+)?jarvis\b[\s,.:!-]*", re.I)
+# Whisper often writes the name differently in Portuguese.
+_WAKE = re.compile(r"^\W*(?:ei\s+|ok\s+|hey\s+|oi\s+)?(?:jarvis|jarves|jarvi|jarviz|djarvis|d'jarvis|charvis)\b[\s,.:!-]*", re.I)
 _CANCEL = re.compile(r"^(cancelar?|cancele|pare|parar|chega|esquece|deixa pra la)\W*$", re.I)
 
 
@@ -84,6 +85,9 @@ async def turn(owner: Optional[str], *, audio: Optional[bytes] = None, text: Opt
         match = _WAKE.match(transcript)
         if not match:
             return {"transcript": transcript, "reply": "", "handled_by": "no_wake_word", "audio": None}  # not addressed: nothing stored
+    spoken_to = _WAKE.match(transcript)
+    if spoken_to:  # the commands expect the name spelled correctly
+        transcript = "Jarvis, " + transcript[spoken_to.end():]
     if _CANCEL.match(_WAKE.sub("", transcript).strip()):
         return {"transcript": transcript, "reply": "Cancelado.", "handled_by": "cancel", "audio": tts("Cancelado.") if speak else None, "cancel": True}
     direct = await intents.handle(transcript, owner)

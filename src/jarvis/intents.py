@@ -28,7 +28,7 @@ _APPROVALS = re.compile(r"^(?:quais |o que |tem |ha |existe )?.*(?:aprovac(?:ao|
 _DAILY = re.compile(r"^(?:todos os dias|todo dia)(?: as| a)? (\d{1,2})(?::(\d{2})| ?h(?:oras?)?(?: e (\d{1,2}))?)? ?(?:me )?(?:informe|avise|diga|mostre|envie|fale)?.*(?:compromissos|agenda)")
 _WEEKLY_AGENDA = re.compile(r"^(?:toda|todo) (segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?(?: as| a)? ?(\d{1,2})?.*(?:compromissos|agenda)")
 _MONITOR_MAIL = re.compile(r"^monitore (?:os |meus |os meus )?e ?-?mails?(?: de (\w+))?$")
-_REMEMBER = re.compile(r"^(?:por favor,? )?(?:lembre|lembra|memorize|guarde|grave|anote|esqueca)\b")
+_REMEMBER = re.compile(r"^(?:por favor,? )?(?:lembre|lembra|memorize|guarde|grave|anote|esqueca|remember|forget)\b")
 
 
 @dataclass

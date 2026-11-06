@@ -272,6 +272,17 @@ def test_wake_word_required_means_ignored_speech_leaves_no_trace():
     assert asyncio.run(voice.turn("ana", audio=b"x", require_wake_word=True, transcribe=lambda a: "Ei Jarvis, como vai?", llm=_llm, tts=_tts))["reply"] == "resposta para como vai?"
 
 
+@pytest.mark.parametrize("heard", ["Djarvis, como vai?", "Jarves como vai?", "Ok jarviz, como vai?"])
+def test_wake_word_survives_common_transcription_variants(heard):
+    out = asyncio.run(voice.turn("ana", audio=b"x", require_wake_word=True, transcribe=lambda a: heard, llm=_llm, tts=_tts))
+    assert out["handled_by"] == "llm" and out["reply"].endswith("como vai?")
+
+
+def test_misspelled_name_still_reaches_direct_commands():
+    out = asyncio.run(voice.turn("ana", audio=b"x", require_wake_word=True, transcribe=lambda a: "Jarves, lembre que uso oculos", llm=_llm, tts=_tts))
+    assert out["handled_by"] == "learn"
+
+
 def test_voice_cancel_and_silence():
     assert asyncio.run(voice.turn("ana", audio=b"x", transcribe=lambda a: "Jarvis, cancelar", llm=_llm, tts=_tts))["cancel"] is True
     assert asyncio.run(voice.turn("ana", audio=b"x", transcribe=lambda a: "", llm=_llm, tts=_tts))["handled_by"] == "silence"

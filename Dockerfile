@@ -42,9 +42,12 @@ WORKDIR /app
 # Install Python deps first (layer cache). Optional extras (PyMuPDF AGPL, etc.)
 # are opt-in so the default image stays MIT-core; see requirements-optional.txt.
 ARG INSTALL_OPTIONAL=false
+# Lighter than INSTALL_OPTIONAL: just Jarvis's local speech recognition and browser client.
+ARG JARVIS_EXTRAS=false
 COPY requirements.txt requirements-optional.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
-    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
+    && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi \
+    && if [ "$JARVIS_EXTRAS" = "true" ]; then pip install --no-cache-dir faster-whisper "av<17" playwright==1.64.1; fi
 
 # Copy app code
 COPY . .
