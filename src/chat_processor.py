@@ -255,6 +255,20 @@ class ChatProcessor:
                 except Exception as _e:
                     logger.warning("Failed to increment memory uses: %s", _e)
 
+            # Jarvis long-term memory, wrapped as data like every other memory.
+            try:
+                from src.jarvis import config as _jarvis_config, memory as _jarvis_memory
+                if _jarvis_config.get("memory.inject_in_chat", True):
+                    _jarvis_ctx = _jarvis_memory.context_for_chat(
+                        message, owner=owner or "", limit=int(_jarvis_config.get("memory.max_injected", 6)))
+                    if _jarvis_ctx:
+                        preface.append(untrusted_context_message(
+                            "jarvis memory",
+                            f"Known about the user. Do not mention unless relevant.\n{_jarvis_ctx}",
+                        ))
+            except Exception as _e:
+                logger.warning("Jarvis memory unavailable: %s", _e)
+
             # (skills index injection moved out — see below; only fires in
             # agent mode so chat mode and incognito stay clean.)
 

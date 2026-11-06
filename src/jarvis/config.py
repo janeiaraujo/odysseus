@@ -12,6 +12,8 @@ from src.constants import JARVIS_CONFIG_FILE
 
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
+    "timezone": "America/Sao_Paulo",
+    "intents": {"enabled": True},
     "persona": {"enabled": True, "name": "J.A.R.V.I.S.", "language": "pt-BR", "address_as": ""},
     "router": {
         "profile": "equilibrado",

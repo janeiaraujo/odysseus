@@ -327,9 +327,21 @@ def _set_user_time_from_request(request: Request) -> None:
         pass
 
 
-def _jarvis_record_metrics(owner, url, model, metrics) -> None:
+def _jarvis_after_turn(owner, url, model, metrics, fallbacks, message, session_id, incognito) -> None:
+    """Usage ledger and learning. Neither may ever break a finished chat turn."""
+    from src.jarvis.learning import observe_user_message
     from src.jarvis.router import record_chat_metrics
+    actual = (metrics or {}).get("model") or model
+    for candidate in fallbacks or []:  # a fallback answered: bill it to its own endpoint
+        if candidate[1] == actual and actual != model:
+            url = candidate[0]
+            break
     record_chat_metrics(owner or "", url or "", model or "", metrics)
+    if not incognito:
+        try:
+            observe_user_message(message, owner=owner or "", source_ref=f"session:{session_id}")
+        except Exception as exc:
+            logger.warning("Jarvis learning skipped: %s", exc)
 
 
 def _jarvis_record_failure(owner, url, model, event) -> None:
@@ -1088,6 +1100,22 @@ def setup_chat_routes(
                 _model_info["character_name"] = ctx.preset.character_name
             yield f'data: {json.dumps(_model_info)}\n\n'
 
+            # Jarvis: commands answerable from data cost no tokens.
+            _jarvis_direct = None
+            if not compare_mode and not ctx.preprocessed.attachment_meta and not tool_policy.blocks("manage_calendar"):
+                from src.jarvis.intents import handle as _jarvis_handle
+                _jarvis_direct = await _jarvis_handle(message, _user or "")
+            if _jarvis_direct:
+                full_response = _jarvis_direct["text"]
+                yield f'data: {json.dumps({"delta": full_response})}\n\n'
+                if not incognito:
+                    sess.add_message(ChatMessage("assistant", full_response, metadata={"jarvis_intent": _jarvis_direct["intent"]}))
+                    session_manager.save_sessions()
+                yield f'data: {json.dumps({"type": "metrics", "data": {"total_time": 0, "model": "jarvis-direct", "input_tokens": 0, "output_tokens": 0}})}\n\n'
+                yield "data: [DONE]\n\n"
+                _active_streams.pop(session, None)
+                return
+
             if _is_image_generation_session(sess, owner=_user):
                 from src.settings import get_setting
                 if tool_policy.blocks("generate_image"):
@@ -1220,7 +1248,7 @@ def setup_chat_routes(
                                 }
                                 yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
                             if full_response:
-                                _jarvis_record_metrics(_user, sess.endpoint_url, _requested_model, last_metrics)
+                                _jarvis_after_turn(_user, sess.endpoint_url, _requested_model, last_metrics, _fallback_candidates, message, session, incognito)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
@@ -1359,7 +1387,7 @@ def setup_chat_routes(
                             yield chunk
                         elif chunk == "data: [DONE]\n\n":
                             if full_response:
-                                _jarvis_record_metrics(_user, sess.endpoint_url, _requested_model, last_metrics)
+                                _jarvis_after_turn(_user, sess.endpoint_url, _requested_model, last_metrics, _fallback_candidates, message, session, incognito)
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,

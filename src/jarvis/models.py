@@ -292,6 +292,7 @@ class Device(Base):
     entity_id = Column(String, nullable=False)
     area = Column(String, default="")
     source = Column(String, default="manual")
+    critical = Column(Boolean, default=False)  # physical risk: always needs human approval
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
     __table_args__ = (UniqueConstraint("owner", "entity_id"),)
