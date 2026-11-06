@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""jarvis-train: optional LoRA fine-tuning job, separate from inference.
+
+    scripts/jarvis-train --run RUN_ID --dataset PATH --base-model MODEL --method lora [--dry-run]
+
+--dry-run validates the dataset and reports whether this machine can train.
+Training needs a GPU plus torch, transformers, peft and datasets, none of which
+are installed by default. Results are recorded on the run, so a new model can be
+compared, activated and rolled back. NOT yet exercised on real hardware.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+
+
+def validate_dataset(path: Path) -> dict:
+    problems, examples = [], 0
+    with open(path, encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            try:
+                messages = json.loads(line)["messages"]
+                if [m["role"] for m in messages] != ["user", "assistant"] or not all(m["content"].strip() for m in messages):
+                    problems.append(f"linha {number}: formato inesperado")
+                examples += 1
+            except (ValueError, KeyError, TypeError):
+                problems.append(f"linha {number}: JSON invalido")
+    return {"examples": examples, "problems": problems[:10], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def capabilities() -> dict:
+    out = {"gpu": False, "missing": []}
+    for module in ("torch", "transformers", "peft", "datasets"):
+        try:
+            __import__(module)
+        except ImportError:
+            out["missing"].append(module)
+    if "torch" not in out["missing"]:
+        import torch
+        out["gpu"] = bool(torch.cuda.is_available())
+    return out
+
+
+def train(dataset: Path, base_model: str, output: Path) -> dict:
+    from datasets import load_dataset
+    from peft import LoraConfig, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, Trainer, TrainingArguments
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
+    model = get_peft_model(AutoModelForCausalLM.from_pretrained(base_model, device_map="auto"), LoraConfig(r=8, lora_alpha=16, lora_dropout=0.05, task_type="CAUSAL_LM"))
+    data = load_dataset("json", data_files=str(dataset))["train"].map(
+        lambda row: tokenizer(tokenizer.apply_chat_template(row["messages"], tokenize=False), truncation=True, max_length=1024), remove_columns=["messages"])
+    trainer = Trainer(model=model, args=TrainingArguments(output_dir=str(output), num_train_epochs=3, per_device_train_batch_size=1, logging_steps=10, save_strategy="no", report_to=[]),
+                      train_dataset=data, data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False))
+    result = trainer.train()
+    model.save_pretrained(output)
+    tokenizer.save_pretrained(output)
+    return {"train_loss": result.training_loss, "examples": len(data)}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run", required=True)
+    parser.add_argument("--dataset", required=True)
+    parser.add_argument("--base-model", required=True)
+    parser.add_argument("--method", default="lora", choices=["lora"])
+    parser.add_argument("--owner", default="")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    report = validate_dataset(Path(args.dataset))
+    caps = capabilities()
+    print(json.dumps({"dataset": report, "capabilities": caps}, ensure_ascii=False, indent=1))
+    if report["problems"] or not report["examples"]:
+        print("erro: dataset invalido", file=sys.stderr)
+        return 2
+    if args.dry_run:
+        return 0
+    if caps["missing"] or not caps["gpu"]:
+        print("erro: treinar exige GPU e: pip install torch transformers peft datasets", file=sys.stderr)
+        return 3
+    from src.jarvis import learning
+    from src.constants import JARVIS_DATASETS_DIR
+    output = Path(JARVIS_DATASETS_DIR) / "models" / args.run
+    learning.record_training_result(args.run, status="running", owner=args.owner)
+    try:
+        metrics = train(Path(args.dataset), args.base_model, output)
+    except Exception as exc:
+        learning.record_training_result(args.run, status="failed", metrics={"error": type(exc).__name__}, owner=args.owner)
+        raise
+    learning.record_training_result(args.run, status="succeeded", output_ref=str(output), metrics=metrics, owner=args.owner)
+    print(json.dumps(metrics))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# jarvis-migrate-chroma: move vectors from the Chroma container's writable layer
+# into the named volume. Needed once on installs created before the compose fix.
+#   scripts/jarvis-migrate-chroma [--dry-run]
+# Order: stop, copy to a tar (kept as rollback), fill the volume, verify the counts
+# in a temporary container, and only then recreate the real one.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+DRY="${1:-}"
+C="$(docker compose ps -a -q chromadb)"
+[ -n "$C" ] || { echo "erro: container do chromadb nao encontrado" >&2; exit 1; }
+if docker inspect "$C" --format '{{range .Mounts}}{{.Destination}} {{end}}' | grep -qw /data; then
+  echo "Nada a fazer: os vetores ja estao no volume."
+  exit 0
+fi
+V="$(docker inspect "$C" --format '{{range .Mounts}}{{if eq .Destination "/chroma/chroma"}}{{.Name}}{{end}}{{end}}')"
+[ -n "$V" ] || { echo "erro: volume do chromadb nao identificado" >&2; exit 1; }
+IMAGE="$(docker inspect "$C" --format '{{.Config.Image}}')"
+if [ "$DRY" = "--dry-run" ]; then
+  echo "Migraria /data de $C para o volume $V. Nada foi alterado."
+  exit 0
+fi
+OUT="$HOME/jarvis-backups/chroma-pre-migration-$(date +%Y%m%d-%H%M%S).tar"
+mkdir -p "$(dirname "$OUT")"; chmod 700 "$(dirname "$OUT")"
+
+counts() {
+  python3 - "$1" <<'PY'
+import json, sys, urllib.request
+base = f"http://127.0.0.1:{sys.argv[1]}/api/v2/tenants/default_tenant/databases/default_database/collections"
+rows = json.load(urllib.request.urlopen(base, timeout=10))
+print(sorted((c["name"], json.load(urllib.request.urlopen(f"{base}/{c['id']}/count", timeout=10))) for c in rows))
+PY
+}
+BEFORE="$(counts "${CHROMADB_HOST_PORT:-8100}")"
+echo "Antes: $BEFORE"
+docker stop "$C" >/dev/null
+docker cp "$C:/data" - > "$OUT"; chmod 600 "$OUT"
+docker run --rm -i -v "$V:/v" --entrypoint tar "$IMAGE" xf - --strip-components=1 -C /v < "$OUT"
+docker run -d --rm --name jarvis-chroma-verify -p 127.0.0.1:8199:8000 -v "$V:/data" -e ANONYMIZED_TELEMETRY=FALSE "$IMAGE" >/dev/null
+for _ in $(seq 1 30); do curl -fs -m 2 http://127.0.0.1:8199/api/v2/heartbeat >/dev/null && break; sleep 1; done
+CHECK="$(counts 8199)"
+docker stop jarvis-chroma-verify >/dev/null
+if [ "$BEFORE" != "$CHECK" ]; then
+  echo "erro: contagens divergem ($CHECK). Container original preservado; religando." >&2
+  docker start "$C" >/dev/null
+  exit 1
+fi
+docker compose up -d --no-deps chromadb
+for _ in $(seq 1 30); do curl -fs -m 2 "http://127.0.0.1:${CHROMADB_HOST_PORT:-8100}/api/v2/heartbeat" >/dev/null && break; sleep 1; done
+echo "Depois: $(counts "${CHROMADB_HOST_PORT:-8100}")"
+echo "Copia de seguranca: $OUT"

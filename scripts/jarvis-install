@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# jarvis-install: prepare a new machine. Safe to re-run: never overwrites .env or a key.
+#   scripts/jarvis-install [--no-start]
+# Restoring an old machine's state is a separate step; see docs/operations/restore.md.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+command -v docker >/dev/null || { echo "erro: instale o Docker primeiro: https://docs.docker.com/engine/install/" >&2; exit 1; }
+docker compose version >/dev/null || { echo "erro: o plugin docker compose nao foi encontrado" >&2; exit 1; }
+
+if [ ! -f .env ]; then
+  cp .env.example .env
+  chmod 600 .env
+  echo ".env criado a partir do exemplo"
+else
+  echo ".env existente preservado"
+fi
+mkdir -p data logs backups
+
+git remote get-url upstream >/dev/null 2>&1 && git remote set-url --push upstream DISABLED
+
+if [ ! -f "$HOME/jarvis-recovery.key" ]; then
+  umask 077
+  head -c 32 /dev/urandom | base64 | tr -d '\n' > "$HOME/jarvis-recovery.key"
+  echo >> "$HOME/jarvis-recovery.key"
+  echo "Chave de recuperacao criada em $HOME/jarvis-recovery.key. GUARDE UMA COPIA FORA DESTE COMPUTADOR."
+fi
+
+if [ "${1:-}" = "--no-start" ]; then
+  echo "Pronto. Para iniciar: docker compose up -d --build"
+  exit 0
+fi
+
+docker compose up -d --build
+echo "Aguardando a API..."
+for _ in $(seq 1 60); do
+  curl -fs -m 2 "http://127.0.0.1:${APP_PORT:-7000}/api/health" >/dev/null && break
+  sleep 2
+done
+python3 scripts/jarvis-doctor || true
+echo "Abra http://localhost:${APP_PORT:-7000}. A senha inicial, se houver, esta em: docker compose logs odysseus"

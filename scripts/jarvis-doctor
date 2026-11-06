@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""jarvis-doctor: read-only health check of an installation. Standard library only.
+
+    scripts/jarvis-doctor            human-readable
+    scripts/jarvis-doctor --json     machine-readable
+Exit code 1 when any check fails. It never changes anything.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import stat
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+OK, WARN, FAIL = "ok", "aviso", "falha"
+
+
+def run(*cmd, timeout=15):
+    try:
+        out = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, timeout=timeout)
+        return out.returncode, out.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+
+
+def check_git():
+    code, remotes = run("git", "remote", "-v")
+    if code:
+        yield WARN, "Git", "nao e um repositorio Git"
+        return
+    upstream = [l for l in remotes.splitlines() if l.startswith("upstream") and "(push)" in l]
+    if upstream and "DISABLED" not in upstream[0]:
+        yield WARN, "Git", "push para upstream esta habilitado; rode: git remote set-url --push upstream DISABLED"
+    else:
+        yield OK, "Git", "push para upstream bloqueado ou inexistente"
+    _, tracked = run("git", "ls-files")
+    bad = [f for f in tracked.splitlines() if f in (".env",) or f.startswith("data/") or f.endswith((".jrvb", ".app_key", "recovery.key"))]
+    yield (FAIL, "Segredos no Git", f"arquivos privados versionados: {bad[:5]}") if bad else (OK, "Segredos no Git", "nenhum arquivo privado versionado")
+
+
+def check_env():
+    env = REPO / ".env"
+    if not env.exists():
+        yield FAIL, ".env", "ausente; copie de .env.example ou restaure de um backup"
+        return
+    loose = stat.S_IMODE(env.stat().st_mode) & 0o077
+    yield (WARN, ".env", "permissoes abertas; rode: chmod 600 .env") if loose else (OK, ".env", "presente e protegido")
+
+
+def check_data():
+    data = Path(os.environ.get("ODYSSEUS_DATA_DIR", REPO / "data"))
+    key = data / ".app_key"
+    yield (OK, "Chave de criptografia", "presente") if key.exists() else (WARN, "Chave de criptografia", "ausente: sera criada, e segredos antigos nao abrirao")
+    for name, rel in (("Banco Odysseus", "app.db"), ("Banco Jarvis", "jarvis/jarvis.db")):
+        path = data / rel
+        if not path.exists():
+            yield WARN if rel == "app.db" else OK, name, "ainda nao criado"
+            continue
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            result = con.execute("PRAGMA quick_check").fetchone()[0]
+            con.close()
+            yield (OK, name, f"integro ({path.stat().st_size // 1024} KB)") if result == "ok" else (FAIL, name, f"corrompido: {result}")
+        except sqlite3.Error as exc:
+            yield FAIL, name, f"ilegivel: {exc}"
+    usage = shutil.disk_usage(data if data.exists() else REPO)
+    free = usage.free / 1e9
+    pct = (usage.total - usage.free) / usage.total * 100
+    yield (WARN if pct > 90 else OK), "Disco", f"{pct:.0f}% usado, {free:.1f} GB livres"
+
+
+def check_containers():
+    if not shutil.which("docker"):
+        yield WARN, "Docker", "nao instalado"
+        return
+    code, out = run("docker", "compose", "ps", "--format", "json")
+    if code:
+        yield WARN, "Docker", "compose indisponivel ou stack parada"
+        return
+    rows = []
+    for line in out.splitlines():
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        rows += parsed if isinstance(parsed, list) else [parsed]
+    services = {r.get("Service"): r for r in rows}
+    if not services:
+        yield WARN, "Containers", "nenhum em execucao"
+        return
+    for name, row in services.items():
+        healthy = row.get("State") == "running" and row.get("Health") in ("", "healthy", None, "starting")
+        yield (OK if healthy else FAIL), f"Container {name}", f"{row.get('State')} {row.get('Health') or ''}".strip()
+    chroma = services.get("chromadb")
+    if chroma:
+        code, mounts = run("docker", "inspect", chroma.get("Name", ""), "--format", "{{range .Mounts}}{{.Destination}} {{end}}")
+        if code == 0 and "/data" not in mounts.split():
+            yield FAIL, "Persistencia do ChromaDB", "vetores fora do volume e serao perdidos ao recriar; rode scripts/jarvis-migrate-chroma"
+        elif code == 0:
+            yield OK, "Persistencia do ChromaDB", "vetores no volume"
+
+
+def check_http():
+    port = os.environ.get("APP_PORT", "7000")
+    url = f"http://127.0.0.1:{port}/api/health"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            yield (OK, "API", f"respondendo em :{port}") if resp.status == 200 else (FAIL, "API", f"status {resp.status}")
+    except (urllib.error.URLError, OSError):
+        yield WARN, "API", f"sem resposta em :{port}"
+
+
+def check_backups():
+    folder = Path(os.environ.get("JARVIS_BACKUP_DIR", Path.home() / "jarvis-backups"))
+    files = sorted(folder.glob("*.jrvb"), key=lambda p: p.stat().st_mtime) if folder.is_dir() else []
+    if not files:
+        yield WARN, "Backup", "nenhum backup criptografado; rode scripts/jarvis-backup create"
+        return
+    age = (time.time() - files[-1].stat().st_mtime) / 86400
+    yield (WARN if age > 7 else OK), "Backup", f"mais recente ha {age:.1f} dias: {files[-1].name}"
+
+
+def main() -> int:
+    results = []
+    for section in (check_git, check_env, check_data, check_containers, check_http, check_backups):
+        for status, name, detail in section():
+            results.append({"status": status, "check": name, "detail": detail})
+    failed = any(r["status"] == FAIL for r in results)
+    if "--json" in sys.argv:
+        print(json.dumps({"ok": not failed, "checks": results}, ensure_ascii=False, indent=1))
+    else:
+        for r in results:
+            print(f"[{r['status']:>5}] {r['check']}: {r['detail']}")
+        print("\nResultado:", "ha falhas a corrigir" if failed else "saudavel")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

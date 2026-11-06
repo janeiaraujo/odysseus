@@ -34,3 +34,7 @@ PyMuPDF
 # [all]/Azure/audio extras (cloud + heavy). Pinned to a release >30 days old per
 # the dependency-age discussion in issue #485.
 markitdown[docx,pptx,xlsx,xls]==0.1.6
+
+# J.A.R.V.I.S. browser automation. Connects to the `jarvis-browser` compose
+# profile through JARVIS_BROWSER_WS, so the version must match that image.
+playwright==1.64.1
