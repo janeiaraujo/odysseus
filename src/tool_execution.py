@@ -823,6 +823,10 @@ async def _execute_tool_block_impl(
     elif tool == "manage_settings":
         desc = "manage_settings"
         result = await do_manage_settings(content, owner=owner)
+    elif tool == "jarvis_action":
+        from src.jarvis.agent_tool import do_jarvis_action
+        desc = "jarvis_action"
+        result = await do_jarvis_action(content, owner=owner)
     elif tool == "manage_notes":
         desc = "manage_notes"
         result = await do_manage_notes(content, owner=owner)

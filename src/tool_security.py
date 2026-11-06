@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 # server/runtime access, sensitive user data, external messaging, persistent
 # state changes, or generic loopback/integration surfaces.
 NON_ADMIN_BLOCKED_TOOLS = {
+    "jarvis_action",
     "bash",
     "python",
     "manage_bg_jobs",
@@ -105,6 +106,7 @@ _PLAN_MODE_KNOWN_MUTATORS = {
     "write_file", "create_document", "edit_document", "update_document",
     "suggest_document", "manage_documents", "create_session", "manage_session",
     "send_to_session", "pipeline", "manage_memory", "manage_skills",
+    "jarvis_action",
     "manage_tasks", "manage_notes", "manage_endpoints", "manage_mcp",
     "manage_webhooks", "manage_tokens", "manage_settings", "manage_contact",
     "manage_calendar", "api_call", "app_api", "ui_control",

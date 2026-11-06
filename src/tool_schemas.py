@@ -568,6 +568,40 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "jarvis_action",
+            "description": "J.A.R.V.I.S. platform actions: search long-term memory, suggest a memory for user review, list or create persistent missions, control registered smart-home devices, search Gmail, draft or schedule an email, create a Google Calendar event, search authorized Drive documents. External and physical actions wait for the user's approval and report pending_approval; say so plainly instead of claiming they were done.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["memory_search", "memory_suggest", "missions_list", "mission_create", "device_control", "gmail_search", "gmail_schedule", "gmail_draft", "calendar_create", "documents_search"]},
+                    "query": {"type": "string", "description": "memory_search, documents_search"},
+                    "text": {"type": "string", "description": "memory_suggest: the fact. gmail_search: free text."},
+                    "title": {"type": "string", "description": "mission_create, calendar_create"},
+                    "steps": {"type": "array", "items": {"type": "object"}, "description": "mission_create: [{title, handler, params, depends_on}]"},
+                    "cron": {"type": "string", "description": "mission_create: optional schedule in the user's timezone"},
+                    "entity_id": {"type": "string", "description": "device_control"},
+                    "op": {"type": "string", "description": "device_control: on, off, open, close, lock, unlock, set_temperature"},
+                    "value": {"description": "device_control: value for set_temperature"},
+                    "sender": {"type": "string", "description": "gmail_search"},
+                    "subject": {"type": "string", "description": "gmail_search, gmail_schedule, gmail_draft"},
+                    "after": {"type": "string", "description": "gmail_search: YYYY/MM/DD"},
+                    "before": {"type": "string", "description": "gmail_search: YYYY/MM/DD"},
+                    "to": {"type": "array", "items": {"type": "string"}, "description": "gmail_schedule, gmail_draft"},
+                    "body": {"type": "string", "description": "gmail_schedule, gmail_draft"},
+                    "send_at": {"type": "string", "description": "gmail_schedule: ISO 8601 local time"},
+                    "start": {"type": "string", "description": "calendar_create: ISO 8601"},
+                    "end": {"type": "string", "description": "calendar_create: ISO 8601"},
+                    "attendees": {"type": "array", "items": {"type": "string"}, "description": "calendar_create"},
+                    "location": {"type": "string", "description": "calendar_create"},
+                    "reminder_minutes": {"type": "integer", "description": "calendar_create"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "manage_notes",
             "description": "Manage notes and checklists (Google Keep-style): list, add, update, delete, toggle_item. IMPORTANT: For to-do lists / checklists, set note_type='checklist' and pass the items as the `checklist_items` array — do NOT serialize them into `content` as plain text. For freeform notes, use note_type='note' and put the body in `content`. `due_date` accepts natural language like 'tomorrow at 9am' (parsed in the user's timezone) and fires a notification — do not also create a calendar event for the same reminder.",
             "parameters": {

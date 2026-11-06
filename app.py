@@ -212,6 +212,9 @@ if AUTH_ENABLED:
         "/api/health",
         "/api/version",
         "/login",
+        # Google sign-in: only accounts already linked to a user can get a session.
+        "/api/jarvis/google/login",
+        "/api/jarvis/google/login/callback",
     }
     AUTH_EXEMPT_PREFIXES = ["/static"]
     # Dynamic paths whose own handler proves identity via a path-embedded
@@ -789,6 +792,10 @@ app.include_router(setup_contacts_routes())
 from companion import setup_companion_routes
 app.include_router(setup_companion_routes())
 
+# J.A.R.V.I.S. platform layer
+from routes.jarvis_routes import setup_jarvis_routes
+app.include_router(setup_jarvis_routes(memory_manager))
+
 # ========= ROUTES (kept in app.py) =========
 
 def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
@@ -1088,6 +1095,9 @@ async def _startup_event():
     _tasks_inprocess = os.environ.get("ODYSSEUS_INPROCESS_TASKS", "1").strip().lower()
     if _tasks_inprocess not in ("0", "false", "no", "off", ""):
         await task_scheduler.start()
+        # Missions, mail queue and replication follow the same in-process switch.
+        from src.jarvis.worker import start as _jarvis_worker_start
+        _jarvis_worker_start()
     else:
         logger.info(
             "In-process task scheduler disabled (ODYSSEUS_INPROCESS_TASKS=0); "
@@ -1151,6 +1161,11 @@ async def _startup_event():
 
 async def _shutdown_event():
     logger.info("Application shutting down...")
+    try:
+        from src.jarvis.worker import stop as _jarvis_worker_stop
+        await _jarvis_worker_stop()
+    except Exception as e:
+        logger.warning(f"Jarvis worker stop failed: {e}")
     if upload_cleanup_task:
         upload_cleanup_task.cancel()
         try:

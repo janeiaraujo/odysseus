@@ -25,6 +25,9 @@ _CONFLICT = re.compile(rf"^(?:verifique se |existe |ha |tem |tenho )?(?:tenho )?
 _FREE = re.compile(r"^(?:encontre|ache|procure|busque|sugira|tem|ha|existe)(?: um| algum)? (?:horario|espaco|tempo) (?:livre|disponivel)(?: de (\d+(?:[.,]\d)?|um|uma|duas|dois|tres|quatro|cinco|seis|meia) ?(?:h|hora|horas|min|minuto|minutos))?(?: (?:para|na|nesta|essa|esta|na proxima|proxima) ?(semana|hoje|amanha|proxima semana))?$")
 _RECALL = re.compile(r"^(?:o que|oque) (?:voce )?(?:sabe|lembra|se lembra) (?:sobre|de|do|da) (.{2,80})$")
 _APPROVALS = re.compile(r"^(?:quais |o que |tem |ha |existe )?.*(?:aprovac(?:ao|oes)|aprovar)(?: pendentes?)?.*$")
+_DAILY = re.compile(r"^(?:todos os dias|todo dia)(?: as| a)? (\d{1,2})(?::(\d{2})| ?h(?:oras?)?(?: e (\d{1,2}))?)? ?(?:me )?(?:informe|avise|diga|mostre|envie|fale)?.*(?:compromissos|agenda)")
+_WEEKLY_AGENDA = re.compile(r"^(?:toda|todo) (segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?(?: as| a)? ?(\d{1,2})?.*(?:compromissos|agenda)")
+_MONITOR_MAIL = re.compile(r"^monitore (?:os |meus |os meus )?e ?-?mails?(?: de (\w+))?$")
 _REMEMBER = re.compile(r"^(?:por favor,? )?(?:lembre|lembra|memorize|guarde|grave|anote|esqueca)\b")
 
 
@@ -46,6 +49,16 @@ def parse(text: str) -> Optional[Intent]:
     norm, addressed = _strip(text)
     if addressed and re.fullmatch(r"(bom dia|boa tarde|boa noite|ola|oi)", norm):
         return Intent("brief")
+    match = _DAILY.match(norm)
+    if match:
+        return Intent("routine", {"cron": f"{int(match.group(2) or match.group(3) or 0)} {int(match.group(1))} * * *", "title": "Compromissos do dia"})
+    match = _WEEKLY_AGENDA.match(norm)
+    if match:
+        day = (_WEEKDAYS[match.group(1)] + 1) % 7  # cron: 0 = domingo
+        return Intent("routine", {"cron": f"0 {int(match.group(2) or 8)} * * {day}", "title": f"Agenda de {match.group(1)}"})
+    match = _MONITOR_MAIL.match(norm)
+    if match:
+        return Intent("monitor_mail", {"category": (match.group(1) or "").capitalize()})
     match = _AGENDA.match(norm)
     if match:
         return Intent("agenda", {"day": match.group(1)})
@@ -178,6 +191,32 @@ def _do_learn(text: str, owner: str) -> Optional[str]:
     return None if result["candidates"] else "Nao encontrei nada correspondente para esquecer."
 
 
+def _do_routine(params: Dict[str, Any], owner: str) -> str:
+    from src.jarvis import missions
+    mission = missions.create(owner, params["title"], [{"title": "Consultar agenda", "handler": "agenda.brief"},
+                                                       {"title": "Notificar", "handler": "notify", "params": {"title": params["title"], "from_step": 0}, "depends_on": [0]}],
+                              cron=params["cron"], tz=config.get("timezone", "America/Sao_Paulo"))
+    return f"Rotina criada: {params['title']}. Proxima execucao em {_local(mission['next_run_at'])}."
+
+
+def _do_monitor_mail(params: Dict[str, Any], owner: str) -> str:
+    from src.jarvis import missions
+    category = {"Trabalho": "Trabalho", "Pessoal": "Pessoal", "Financeiro": "Financeiro", "Viagens": "Viagens"}.get(params["category"])
+    step_params = {"category": category} if category else {}
+    missions.create(owner, f"Monitorar e-mails{' de ' + category if category else ''}",
+                    [{"title": "Verificar e-mails novos", "handler": "gmail.important", "params": step_params},
+                     {"title": "Notificar", "handler": "notify", "params": {"title": "E-mails", "from_step": 0}, "depends_on": [0]}],
+                    cron="*/15 * * * *", tz=config.get("timezone", "America/Sao_Paulo"))
+    return "Vou verificar a cada 15 minutos e avisar sobre os importantes. Nada sera respondido sem sua aprovacao."
+
+
+def _local(iso: Optional[str]) -> str:
+    if not iso:
+        return "data desconhecida"
+    moment = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(agenda.local_tz())
+    return moment.strftime("%d/%m as %H:%M")
+
+
 async def _do_device(text: str, owner: str) -> Optional[str]:
     cmd = home.parse_command(text, owner)
     if not cmd:
@@ -222,6 +261,10 @@ async def handle(text: str, owner: Optional[str] = "") -> Optional[Dict[str, Any
             answer = _do_approvals(owner)
         elif intent.name == "learn":
             answer = _do_learn(text, owner)
+        elif intent.name == "routine":
+            answer = _do_routine(intent.params, owner)
+        elif intent.name == "monitor_mail":
+            answer = _do_monitor_mail(intent.params, owner)
         else:
             answer = await _do_device(text, owner)
     except Exception as exc:
