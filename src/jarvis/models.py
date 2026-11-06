@@ -307,6 +307,27 @@ class Device(Base):
     __table_args__ = (UniqueConstraint("owner", "entity_id"),)
 
 
+class VoiceTurn(Base):
+    """Transcript only. Audio is never stored unless the user turns that on."""
+    __tablename__ = "jarvis_voice_turns"
+    id = Column(String, primary_key=True, default=new_id)
+    owner = Column(String, default="", index=True)
+    transcript = Column(Text, default="")
+    reply = Column(Text, default="")
+    handled_by = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
+class Notification(Base):
+    __tablename__ = "jarvis_notifications"
+    id = Column(String, primary_key=True, default=new_id)
+    owner = Column(String, default="", index=True)
+    title = Column(String, default="")
+    body = Column(Text, default="")
+    read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
 class ObjectIndex(Base):
     __tablename__ = "jarvis_object_index"
     key = Column(String, primary_key=True)

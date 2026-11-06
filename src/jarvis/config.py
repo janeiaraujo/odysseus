@@ -39,6 +39,8 @@ DEFAULTS: Dict[str, Any] = {
         "max_class_b_month": 9000000,
         "retention": {"backups_keep_last": 14},
     },
+    "notifications": {"ntfy_topic": "jarvis"},
+    "browser": {"enabled": True, "timeout_seconds": 30, "max_text_chars": 20000},
     "home": {"enabled": False},
     "google": {"drive_allowed_folders": {}, "email_categories": {}, "photo_cache_hours": 1},
 }
