@@ -316,7 +316,7 @@ function _initModelPickerDropdown() {
     listEl.classList.toggle('is-empty', !hasAnyModel);
     menu.classList.toggle('no-models', !hasAnyModel);
     if (search) {
-      search.placeholder = hasAnyModel ? 'Search models…' : 'No models connected';
+      search.placeholder = hasAnyModel ? 'Buscar modelos…' : 'No models connected';
     }
     if (searchRow) {
       searchRow.classList.toggle('searching', !!q);
