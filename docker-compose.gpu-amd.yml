@@ -121,6 +121,24 @@ services:
       - video
       - ${RENDER_GID:-render}
 
+  # Optional isolated browser: `docker compose --profile browser up -d` and set
+  # JARVIS_BROWSER_WS=ws://jarvis-browser:3000/ in .env. No published ports, no
+  # capabilities, bounded resources. Jarvis still blocks private addresses per request.
+  jarvis-browser:
+    profiles: ["browser"]
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    command: ["npx", "-y", "playwright@1.64.1", "run-server", "--port", "3000", "--host", "0.0.0.0"]
+    init: true
+    user: pwuser
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    pids_limit: 512
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
   chromadb:
     image: docker.io/chromadb/chroma:latest
     ports:
