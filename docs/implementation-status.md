@@ -32,7 +32,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | FCM | 🧪 🚫 | Implementado; não testado |
 | Home Assistant | 🧪 🚫 | Falta um servidor |
 | MQTT e ESP32 | 📋 | |
-| Voz e modo conversa | 🟡 | Cadeia completa com áudio real por microfone simulado: Whisper, chat, Piper e reprodução. **Falta validar com voz humana** |
+| Voz e modo conversa | 🟡 | Navegador real com fala sintetizada em português (Piper) como microfone: botão de microfone, modo conversa, interrupção por fala, ruído e cliques ignorados, botão de ouvir. Modelo do chat falso nesse teste. **Falta validar com voz humana e microfone físico** |
 | Palavra de ativação | 🟡 | Por transcrição; sem teste com áudio real |
 | Fine-tuning | 🟡 | Dados testados; treino nunca executado (sem GPU) |
 | Android | 📋 | Adiado a pedido do usuário |

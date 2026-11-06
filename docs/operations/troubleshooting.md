@@ -13,5 +13,6 @@
 | Falha ao importar `mcp_servers` | `mcp` 2.x | `requirements.txt` agora fixa `mcp<2`; recompile a imagem |
 | Modo conversa não reage à voz | Microfone errado ou sem permissão | Veja o medidor verde ao lado do botão: se não mexer, escolha o microfone no navegador. Requer `localhost` ou HTTPS |
 | Sem som na resposta | TTS desligado | Configurações > TTS > "Local em português (Piper)" |
-| Transcrição errada | Modelo pequeno | Configurações > STT: troque `base` por `small` (mais preciso, usa mais memória) |
+| Transcrição errada | Modelo pequeno | Configurações > STT: use `small` (`base` gasta menos memória, mas erra mais em português) |
+| "O áudio do navegador não iniciou" | Relógio de áudio parado, sem saída de som utilizável (ex.: fone Bluetooth adormecido) | Escolha outra saída no sistema e recarregue a página |
 | Memórias sumiram | Versão antiga da limpeza | Restaure de `data/memory_history/` |

@@ -15,6 +15,12 @@ Importar 130 memórias deixava de 4 a 10. Havia três causas somadas no Odysseus
 
 "Salvar tudo" usa uma só requisição (`/api/memory/add-bulk`). As memórias perdidas foram recuperadas do ChromaDB (223 restauradas).
 
+### Corrigido: voz (06/11/2026)
+- O Whisper agora filtra ruído (`vad_filter`): ruído de fundo virava frases inventadas, como "Tchau.", que o modo conversa enviaria ao chat. Cliques e tosses (menos de 0,25s de voz) nem saem do navegador.
+- O nome "Jarvis" é reconhecido (`hotwords`); antes saía "Já vi". Modelo recomendado passou a ser `small`: acerta bem mais em português, com cerca de 2,3s por frase em CPU.
+- Todos os fatos de identidade entram no contexto do chat. O limite de 12 podia cortar justamente onde o usuário mora.
+- Aviso visível quando o relógio de áudio do navegador não anda (sem saída de som utilizável): antes a tela dizia "Ouvindo" sem ouvir nada. Uma resposta que nunca chega não deixa mais o microfone surdo.
+
 ### Adicionado (06/11/2026)
 - **Modo conversa** no chat: botão ao lado do microfone que escuta, responde em voz e volta a escutar, com medidor de nível, interrupção por fala e todas as ferramentas do agente.
 - **Voz em português no servidor** com Piper; transcrição local com Whisper. Corrigida a incompatibilidade `faster-whisper` x `av`, que fazia a transcrição falhar em silêncio.
