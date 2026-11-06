@@ -192,6 +192,23 @@ async def read_state(entity_id: str, *, transport: Any = None) -> Dict[str, Any]
         return resp.json()
 
 
+async def read_device(device: Dict[str, Any], *, transport: Any = None) -> Dict[str, Any]:
+    state = await read_state(device["entity_id"], transport=transport)
+    attributes = state.get("attributes") or {}
+    return {"state": state.get("state"), "unit": attributes.get("unit_of_measurement", ""), "updated": state.get("last_updated", "")}
+
+
+async def camera_snapshot(device: Dict[str, Any], *, owner: Optional[str] = "", transport: Any = None) -> bytes:
+    """One frame, on request. Never stored, and every view is audited."""
+    if device.get("domain") != "camera":
+        raise UnsafeAction("este dispositivo não é uma câmera")
+    async with _client(transport) as client:
+        resp = await client.get(f"/api/camera_proxy/{device['entity_id']}")
+        resp.raise_for_status()
+    audit.record("home.camera_view", owner=owner, risk="read", target=device["entity_id"])
+    return resp.content
+
+
 async def _call(action: Action, transport: Any = None) -> Dict[str, Any]:
     async with _client(transport) as client:
         resp = await client.post(f"/api/services/{action.domain}/{action.service}", json={"entity_id": action.entity_id, **action.data})

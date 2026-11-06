@@ -206,3 +206,63 @@ def test_tool_is_registered_everywhere_and_blocked_for_non_admins():
     assert "jarvis_action" in TOOL_TAGS and "jarvis_action" in NON_ADMIN_BLOCKED_TOOLS
     assert any(t["function"]["name"] == "jarvis_action" for t in FUNCTION_TOOL_SCHEMAS)
     assert function_call_to_tool_block("jarvis_action", '{"action": "missions_list"}') is not None
+
+
+# --- automatic chat routing, routines, conflicts ----------------------------------
+
+def test_auto_routing_is_per_user_and_off_by_default(client):
+    assert client.get("/api/jarvis/routing", headers=ANA).json() == {"auto": False}
+    assert client.put("/api/jarvis/routing", headers=ANA, json={"auto": True}).json() == {"auto": True}
+    assert client.get("/api/jarvis/routing", headers=ANA).json() == {"auto": True}
+    assert client.get("/api/jarvis/routing", headers=ADMIN).json() == {"auto": False}
+
+
+def test_route_turn_empty_when_off_and_respects_cost_rules(monkeypatch):
+    from src.jarvis import router
+    ep = SimpleNamespace(id="o", name="O", base_url="https://openrouter.ai/api/v1", cached_models='["a:free", "openai/gpt-5.4"]', hidden_models=None, pinned_models=None, model_type="llm", endpoint_kind="auto", supports_tools=None)
+    monkeypatch.setattr(router, "_load_endpoints", lambda owner: [ep])
+    monkeypatch.setattr(router, "_configured_chain", lambda owner: set())
+    monkeypatch.setattr("src.endpoint_resolver.resolve_endpoint_by_id", lambda eid, model, owner=None: (f"https://openrouter.ai/api/v1/chat/completions", model, {}))
+    assert router.route_turn("ana") == []
+    router.set_auto_chat("ana", True)
+    assert [t[1] for t in router.route_turn("ana")] == ["a:free"]  # never the unauthorized paid model
+
+
+def test_routines_are_idempotent_and_skip_what_does_not_apply(client, monkeypatch):
+    monkeypatch.delenv("JARVIS_BACKUP_KEY", raising=False)
+    monkeypatch.delenv("JARVIS_BACKUP_KEY_FILE", raising=False)
+    first = client.post("/api/jarvis/routines", headers=ADMIN).json()
+    assert first["created"] == ["Consolidar memória"]
+    assert {s["title"] for s in first["skipped"]} == {"Backup criptografado", "Sincronizar agenda Google", "Triagem de e-mail", "Sincronizar Drive"}
+    monkeypatch.setenv("JARVIS_BACKUP_KEY", "uma-chave-de-teste-longa")
+    second = client.post("/api/jarvis/routines", headers=ADMIN).json()
+    assert second["created"] == ["Backup criptografado"] and second["already_active"] == ["Consolidar memória"]
+    assert client.post("/api/jarvis/routines", headers=ANA).status_code == 403
+
+
+def test_conflicts_are_listed_owner_scoped_and_resolved(client):
+    client.post("/api/jarvis/memory", headers=ANA, json={"text": "Meu aniversario e 10/05"})
+    b = client.post("/api/jarvis/memory", headers=ANA, json={"text": "Meu aniversario e 12/06"}).json()["item"]
+    pairs = client.get("/api/jarvis/memory/conflicts", headers=ANA).json()["conflicts"]
+    assert len(pairs) == 1 and client.get("/api/jarvis/memory/conflicts", headers=ADMIN).json()["conflicts"] == []
+    other = pairs[0]["b"]["id"] if pairs[0]["a"]["id"] == b["id"] else pairs[0]["a"]["id"]
+    assert client.post("/api/jarvis/memory/resolve", headers=ANA, json={"keep_id": b["id"], "drop_id": other}).status_code == 200
+    assert client.get("/api/jarvis/memory/conflicts", headers=ANA).json()["conflicts"] == []
+
+
+def test_read_sensor_and_camera_with_mock(monkeypatch):
+    import asyncio
+    import httpx
+    home.configure("http://ha", "tok")
+    sensor = home.upsert_device("ana", name="Temp", entity_id="sensor.temp")
+    camera = home.upsert_device("ana", name="Cam", entity_id="camera.sala")
+
+    def handler(request):
+        if request.url.path == "/api/states/sensor.temp":
+            return httpx.Response(200, json={"state": "24.5", "attributes": {"unit_of_measurement": "°C"}, "last_updated": "t"})
+        return httpx.Response(200, content=b"jpeg")
+    transport = httpx.MockTransport(handler)
+    assert asyncio.run(home.read_device(sensor, transport=transport))["state"] == "24.5"
+    assert asyncio.run(home.camera_snapshot(camera, owner="ana", transport=transport)) == b"jpeg"
+    with pytest.raises(home.UnsafeAction):
+        asyncio.run(home.camera_snapshot(sensor, owner="ana", transport=transport))
