@@ -1181,6 +1181,8 @@ def setup_chat_routes(
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
                                 data = json.loads(chunk[6:])
+                                if data.get("error"):
+                                    _jarvis_record_failure(_user, sess.endpoint_url, _requested_model, data)
                                 if "delta" in data:
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them so the client can show a thinking
@@ -1338,6 +1340,8 @@ def setup_chat_routes(
                         if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                             try:
                                 data = json.loads(chunk[6:])
+                                if data.get("error"):
+                                    _jarvis_record_failure(_user, sess.endpoint_url, _requested_model, data)
                                 if "delta" in data:
                                     # Reasoning tokens arrive flagged thinking:true.
                                     # Forward them for the live indicator, but keep
