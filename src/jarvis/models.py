@@ -282,6 +282,15 @@ class IndexedFile(Base):
     __table_args__ = (UniqueConstraint("owner", "provider", "file_id"),)
 
 
+class DocChunk(Base):
+    __tablename__ = "jarvis_doc_chunks"
+    id = Column(String, primary_key=True)  # "<file row id>:<n>", also the vector id
+    file_row_id = Column(String, ForeignKey("jarvis_indexed_files.id", ondelete="CASCADE"), index=True)
+    owner = Column(String, default="", index=True)
+    n = Column(Integer, default=0)
+    text = Column(Text, default="")
+
+
 class Device(Base):
     __tablename__ = "jarvis_devices"
     id = Column(String, primary_key=True, default=new_id)

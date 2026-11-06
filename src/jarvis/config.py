@@ -40,6 +40,7 @@ DEFAULTS: Dict[str, Any] = {
         "retention": {"backups_keep_last": 14},
     },
     "home": {"enabled": False},
+    "google": {"drive_allowed_folders": {}, "email_categories": {}, "photo_cache_hours": 1},
 }
 
 _lock = threading.RLock()
