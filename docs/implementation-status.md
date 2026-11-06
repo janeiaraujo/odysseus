@@ -12,7 +12,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | Comandos diretos | ✅ | Chat real: nenhuma chamada ao modelo |
 | Roteador: filtro, uso, ranking | ✅ | Testes e chat real; preços reais do OpenRouter só com simulação |
 | Roteador automático no chat | 📋 | Seleção manual continua; ranking em missões e voz |
-| Memória híbrida | ✅ | ChromaDB real e reinício da aplicação |
+| Memória híbrida | ✅ | ChromaDB real, reinício e importação de 130 itens sem perda |
 | Aprendizado | ✅ | Testes e chat real |
 | Missões e worker | ✅ | Reinício real; execução de passos em testes |
 | Backup e restauração | ✅ | Dados reais restaurados em ambiente limpo |
@@ -32,7 +32,7 @@ Legenda: ✅ testado de verdade · 🧪 testado com simulação · 🟡 parcial 
 | FCM | 🧪 🚫 | Implementado; não testado |
 | Home Assistant | 🧪 🚫 | Falta um servidor |
 | MQTT e ESP32 | 📋 | |
-| Voz | 🟡 | Pipeline em testes; STT e TTS estão desligados nesta instalação; **sem teste com áudio real** |
+| Voz e modo conversa | 🟡 | Cadeia completa com áudio real por microfone simulado: Whisper, chat, Piper e reprodução. **Falta validar com voz humana** |
 | Palavra de ativação | 🟡 | Por transcrição; sem teste com áudio real |
 | Fine-tuning | 🟡 | Dados testados; treino nunca executado (sem GPU) |
 | Android | 📋 | Adiado a pedido do usuário |

@@ -11,3 +11,7 @@
 | E-mail em "verificando" | Envio interrompido | Aguarde: a fila confere no Gmail antes de reenviar |
 | Modelo pago ausente no fallback | Regras de custo | Aba Modelos, ou orçamento atingido |
 | Falha ao importar `mcp_servers` | `mcp` 2.x | `requirements.txt` agora fixa `mcp<2`; recompile a imagem |
+| Modo conversa não reage à voz | Microfone errado ou sem permissão | Veja o medidor verde ao lado do botão: se não mexer, escolha o microfone no navegador. Requer `localhost` ou HTTPS |
+| Sem som na resposta | TTS desligado | Configurações > TTS > "Local em português (Piper)" |
+| Transcrição errada | Modelo pequeno | Configurações > STT: troque `base` por `small` (mais preciso, usa mais memória) |
+| Memórias sumiram | Versão antiga da limpeza | Restaure de `data/memory_history/` |
