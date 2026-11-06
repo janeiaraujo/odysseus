@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -211,15 +212,12 @@ def test_device_of_another_owner_is_not_reachable(devices):
 def real_calendar(monkeypatch):
     from tests.helpers.sqlite_db import make_temp_sqlite
     import core.database as cdb
-    session_local, engine, tmp = make_temp_sqlite(cdb.Base)
+    session_local, engine, tmp = make_temp_sqlite(cdb.Base.metadata)
     monkeypatch.setattr(cdb, "SessionLocal", session_local)
     yield session_local
     engine.dispose()
-    os_remove = __import__("os").remove
-    try:
-        os_remove(tmp)
-    except OSError:
-        pass
+    tmp.close()
+    os.remove(tmp.name)
 
 
 def _seed(session_local):
