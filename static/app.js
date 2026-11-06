@@ -3345,6 +3345,7 @@ function initializeEventListeners() {
 // INITIALIZATION ON PAGE LOAD
 // ============================================
 function startOdysseusApp() {
+  jarvisModule.initJarvis();
   if (window.__odysseusAppStarted) return;
   window.__odysseusAppStarted = true;
   // Set CSS variables

@@ -3,7 +3,6 @@
  * All server data is written with textContent (through h()), never innerHTML.
  */
 const API = '/api/jarvis';
-const ICON_PATH = 'M12 3a9 9 0 1 0 0 18a9 9 0 0 0 0-18zm0 5a4 4 0 1 1 0 8a4 4 0 0 1 0-8z';
 let _open = false;
 let _tab = 'painel';
 let _renderToken = 0;
@@ -94,6 +93,29 @@ const statusTone = { connected: 'ok', sent: 'ok', completed: 'ok', succeeded: 'o
 const STATUS_PT = { connected: 'conectada', reauth_required: 'reconectar', fact: 'fato', hypothesis: 'hipótese', conflicted: 'em conflito', pending: 'pendente', running: 'executando', succeeded: 'concluído', failed: 'falhou', cancelled: 'cancelado', active: 'ativa', completed: 'concluída', waiting_approval: 'aguardando aprovação', awaiting_approval: 'aguardando aprovação', queued: 'na fila', sending: 'enviando', sent: 'enviado', uncertain: 'verificando', approved: 'aprovado', rejected: 'rejeitado', executed: 'executado', expired: 'expirado' };
 const statusBadge = (s) => badge(STATUS_PT[s] || s, statusTone[s]);
 
+const KIND_PT = { semantic: 'semântica', episodic: 'episódica', procedural: 'procedural', operational: 'operacional' };
+const CATEGORY_PT = { fact: 'fato', preference: 'preferência', identity: 'identidade', foto: 'foto', missao: 'missão' };
+const SOURCE_PT = { user: 'você', assistant: 'assistente', document: 'documento', email: 'e-mail', web: 'internet', system: 'sistema', import: 'importada', tool: 'ferramenta', attachment: 'anexo' };
+
+function jarvisMark() {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', 'jarvis-mark');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const [r, filled] of [[10, false], [4, true]]) {
+    const circle = document.createElementNS(NS, 'circle');
+    circle.setAttribute('cx', '12');
+    circle.setAttribute('cy', '12');
+    circle.setAttribute('r', String(r));
+    circle.setAttribute('fill', filled ? 'currentColor' : 'none');
+    circle.setAttribute('stroke', 'currentColor');
+    circle.setAttribute('stroke-width', '2');
+    svg.append(circle);
+  }
+  return svg;
+}
+
 // ---- Painel ----
 async function renderPainel(root) {
   const [status, candidates] = await Promise.all([api('/status'), api('/learning/candidates')]);
@@ -103,7 +125,7 @@ async function renderPainel(root) {
   const answer = await api('/command', { json: { text: 'Jarvis, bom dia' } }).catch(() => null);
   if (answer?.text) brief.textContent = answer.text;
   root.append(
-    card(null, h('div', { class: 'jarvis-identity' }, h('svg', { viewBox: '0 0 24 24', class: 'jarvis-mark', 'aria-hidden': 'true' }), h('div', {}, h('div', { class: 'jarvis-title' }, status.identity.name), sub(status.identity.meaning))), brief),
+    card(null, h('div', { class: 'jarvis-identity' }, jarvisMark(), h('div', {}, h('div', { class: 'jarvis-title' }, status.identity.name), sub(status.identity.meaning))), brief),
     h('div', { class: 'jarvis-stats' },
       stat('Memórias', status.memory.total),
       stat('Aprovações pendentes', status.approvals_pending, status.approvals_pending ? 'warn' : null),
@@ -114,11 +136,10 @@ async function renderPainel(root) {
     monitor && card('Serviços', h('div', { class: 'jarvis-chips' }, monitor.services.map((s) => badge(`${s.name}: ${s.online ? 'online' : 'offline'}`, s.online ? 'ok' : (s.required ? 'err' : null))))),
     candidates.candidates.length ? card('Revisar antes de guardar', candidates.candidates.slice(0, 3).map(candidateRow), sub('Veja todos na aba Memória.')) : null,
   );
-  root.querySelector('.jarvis-mark').innerHTML = `<path fill="currentColor" fill-rule="evenodd" d="${ICON_PATH}"/>`;
 }
 
 function candidateRow(c) {
-  const line = row(h('div', { class: 'grow' }, c.text, h('div', {}, badge(c.category), ' ', badge(c.source_type === 'user' ? 'você disse' : `origem: ${c.source_type}`, c.source_type === 'user' ? null : 'warn'))),
+  const line = row(h('div', { class: 'grow' }, c.text, h('div', {}, badge(CATEGORY_PT[c.category] || c.category), ' ', badge(c.source_type === 'user' ? 'você disse' : `origem: ${SOURCE_PT[c.source_type] || c.source_type}`, c.source_type === 'user' ? null : 'warn'))),
     btn('Guardar', async () => { if (await act(() => api(`/learning/candidates/${c.id}`, { json: { approve: true } }), 'Guardado.')) line.remove(); }),
     btn('Descartar', async () => { if (await act(() => api(`/learning/candidates/${c.id}`, { json: { approve: false } }))) line.remove(); }, 'delete'));
   return line;
@@ -279,7 +300,7 @@ async function renderModelos(root) {
     [['never', 'Nunca usar pagos como fallback'], ['configured', 'Só os que listei na cadeia de fallback'], ['always', 'O roteador pode escolher qualquer um']].map(([v, l]) => h('option', { value: v, selected: v === data.paid_fallback_mode }, l)));
   const tierBadge = (t) => badge({ local: 'local', free: 'grátis', paid: 'pago' }[t] || t, t === 'paid' ? 'warn' : 'ok');
   root.append(
-    card('Roteamento', row(h('label', { class: 'grow' }, 'Perfil ', select), h('label', { class: 'grow' }, 'Pagos ', mode)), sub(`${data.catalog_total} modelos no catálogo. A seleção manual no chat continua valendo.`)),
+    card('Roteamento', row(h('label', { class: 'grow' }, 'Perfil ', select), h('label', { class: 'grow' }, 'Pagos ', mode)), sub(`${data.catalog_total} ${data.catalog_total === 1 ? 'modelo' : 'modelos'} no catálogo. A seleção manual no chat continua valendo.`)),
     card('Uso (30 dias)', h('div', { class: 'jarvis-stats' }, stat('Custo no mês', `US$ ${usage.month_cost_usd.toFixed(4)}`, usage.budget_exceeded ? 'err' : null), stat('Orçamento', usage.monthly_budget_usd ? `US$ ${usage.monthly_budget_usd}` : 'sem limite'), stat('Chamadas sem preço', usage.calls_without_price, usage.calls_without_price ? 'warn' : null)),
       usage.calls_without_price ? sub('Sem preço conhecido não entram no custo. Atualize os preços do OpenRouter abaixo ou configure-os.') : null,
       h('div', { class: 'jarvis-table' }, usage.models.slice(0, 15).map((m) => row(h('div', { class: 'grow jarvis-mono' }, m.model), badge(`${m.calls}x`), badge(`${m.input_tokens + m.output_tokens} tok`), m.errors ? badge(`${m.errors} erros`, 'err') : null, tierBadge(m.tier)))),
@@ -296,7 +317,7 @@ async function renderMemoria(root) {
   const hypo = h('input', { type: 'checkbox', onchange: () => load() });
   const statsBox = h('div', { class: 'jarvis-stats' });
   const item = (m) => {
-    const line = row(h('div', { class: 'grow' }, m.text, h('div', {}, statusBadge(m.status), ' ', badge(m.kind), ' ', badge(`origem: ${m.source_type}`), m.version > 1 ? badge(`v${m.version}`) : null)),
+    const line = row(h('div', { class: 'grow' }, m.text, h('div', {}, statusBadge(m.status), ' ', badge(KIND_PT[m.kind] || m.kind), ' ', badge(`origem: ${SOURCE_PT[m.source_type] || m.source_type}`), m.version > 1 ? badge(`v${m.version}`) : null)),
       btn('Corrigir', async () => {
         const area = h('textarea', { class: 'jarvis-input', rows: 2 }, m.text);
         line.replaceChildren(area, btn('Salvar', async () => { if (await act(() => api(`/memory/${m.id}`, { method: 'PATCH', json: { text: area.value } }), 'Corrigido; a versão anterior ficou no histórico.')) load(); }), btn('Voltar', () => load(), 'delete'));
@@ -312,7 +333,7 @@ async function renderMemoria(root) {
     const data = await act(() => api(`/memory?${params}`));
     if (!data) return;
     list.replaceChildren(...(data.items.length ? data.items.map(item) : [empty('Nada encontrado.')]));
-    statsBox.replaceChildren(stat('Total', data.stats.total), ...Object.entries(data.stats.by_kind).map(([k, n]) => stat(k, n)), data.stats.by_status.conflicted ? stat('Em conflito', data.stats.by_status.conflicted, 'err') : '');
+    statsBox.replaceChildren(stat('Total', data.stats.total), ...Object.entries(data.stats.by_kind).map(([k, n]) => stat(KIND_PT[k] || k, n)), data.stats.by_status.conflicted ? stat('Em conflito', data.stats.by_status.conflicted, 'err') : '');
   };
   const newText = input({ placeholder: 'O que devo lembrar?', 'aria-label': 'Nova memória' });
   const candidates = await api('/learning/candidates');
@@ -448,7 +469,7 @@ async function renderMonitor(root) {
     card('Serviços', h('div', { class: 'jarvis-chips' }, m.services.map((s) => badge(`${s.name}: ${s.online ? 'online' : 'offline'}`, s.online ? 'ok' : (s.required ? 'err' : null))))),
     h('div', { class: 'jarvis-stats' }, stat('Carga (1 min)', `${r.load_1m} / ${r.cpu_count} CPUs`), stat('RAM', `${r.memory_pct ?? '?'}%`, r.memory_pct > 90 ? 'warn' : null), stat('Disco', `${r.disk_pct}%`, r.disk_pct > 90 ? 'err' : null), stat('Disco livre', fmtBytes(r.disk_free)), stat('Banco Odysseus', fmtBytes(m.databases.app_db_bytes)), stat('Banco Jarvis', fmtBytes(m.databases.jarvis_db_bytes))),
     r.gpu ? card('GPU', r.gpu.map((g) => row(h('div', { class: 'grow' }, g.name), badge(`${g.utilization_pct}%`), badge(`${g.memory_used_mb}/${g.memory_total_mb} MB`)))) : null,
-    card('Modelos e custo', h('div', { class: 'jarvis-chips' }, badge(`${m.models.total} modelos`), dict(m.models.by_tier), badge(`US$ ${m.usage.month_cost_usd.toFixed(4)} no mês`, m.usage.budget_exceeded ? 'err' : null))),
+    card('Modelos e custo', h('div', { class: 'jarvis-chips' }, badge(`${m.models.total} ${m.models.total === 1 ? 'modelo' : 'modelos'}`), dict(m.models.by_tier), badge(`US$ ${m.usage.month_cost_usd.toFixed(4)} no mês`, m.usage.budget_exceeded ? 'err' : null))),
     card('Trabalho em segundo plano', h('div', { class: 'jarvis-chips' }, badge(`Passos rodando: ${m.steps_running}`), dict(m.missions), dict(m.mail_queue)), m.sync.map((s) => row(h('div', { class: 'grow' }, s.resource), s.last_error ? badge(s.last_error, 'err') : badge(fmtDate(s.last_ok_at), 'ok')))),
   );
 }
@@ -535,10 +556,42 @@ export function openJarvis(tab) {
 export function closeJarvis() {
   document.getElementById('jarvis-modal')?.classList.add('hidden');
   _open = false;
+  refreshAttention();
   document.removeEventListener('keydown', _onKey);
   closeMic();
   stopSpeaking();
 }
 
 export const isJarvisOpen = () => _open;
-export default { openJarvis, closeJarvis, isJarvisOpen };
+
+/** Attention dot on the nav button: actions and memories waiting for the user. */
+async function refreshAttention() {
+  try {
+    const status = await api('/status');
+    const pending = status.approvals_pending + status.learning_pending;
+    for (const id of ['tool-jarvis-btn', 'rail-jarvis']) {
+      const button = document.getElementById(id);
+      if (!button) continue;
+      button.classList.toggle('jarvis-attention', pending > 0);
+      if (pending > 0) button.setAttribute('aria-description', `${pending} item(ns) aguardando você`);
+      else button.removeAttribute('aria-description');
+    }
+  } catch { /* logged out or offline: try again on the next tick */ }
+}
+
+export function initJarvis() {
+  refreshAttention();
+  setInterval(refreshAttention, 60000);
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get('jarvis');
+  if (window.location.pathname === '/jarvis' || result) {
+    openJarvis(result ? 'integracoes' : undefined);
+    if (result) {
+      setTimeout(() => feedback(result === 'google_connected' ? 'Conta Google conectada.' : 'A autorização do Google foi cancelada.', result === 'google_connected' ? 'ok' : 'warn'), 400);
+      params.delete('jarvis');
+      history.replaceState(null, '', window.location.pathname + (params.toString() ? `?${params}` : ''));
+    }
+  }
+}
+
+export default { openJarvis, closeJarvis, isJarvisOpen, initJarvis };

@@ -1107,11 +1107,12 @@ def setup_chat_routes(
                 _jarvis_direct = await _jarvis_handle(message, _user or "")
             if _jarvis_direct:
                 full_response = _jarvis_direct["text"]
+                yield f'data: {json.dumps({"type": "model_info", "model": "J.A.R.V.I.S."})}\n\n'
                 yield f'data: {json.dumps({"delta": full_response})}\n\n'
                 if not incognito:
-                    sess.add_message(ChatMessage("assistant", full_response, metadata={"jarvis_intent": _jarvis_direct["intent"]}))
+                    sess.add_message(ChatMessage("assistant", full_response, metadata={"model": "J.A.R.V.I.S.", "jarvis_intent": _jarvis_direct["intent"]}))
                     session_manager.save_sessions()
-                yield f'data: {json.dumps({"type": "metrics", "data": {"total_time": 0, "model": "jarvis-direct", "input_tokens": 0, "output_tokens": 0}})}\n\n'
+                yield f'data: {json.dumps({"type": "metrics", "data": {"total_time": 0, "model": "J.A.R.V.I.S.", "input_tokens": 0, "output_tokens": 0}})}\n\n'
                 yield "data: [DONE]\n\n"
                 _active_streams.pop(session, None)
                 return

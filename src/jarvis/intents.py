@@ -117,7 +117,7 @@ def _do_agenda(params: Dict[str, Any], owner: str) -> str:
     text = f"Agenda para {label}:\n{agenda.format_events(events, with_day=multi_day)}"
     conflicts = agenda.find_conflicts(events)
     if conflicts:
-        text += f"\n\nAtencao: {len(conflicts)} conflito(s) de horário."
+        text += f"\n\nAtenção: {len(conflicts)} {'conflito' if len(conflicts) == 1 else 'conflitos'} de horário."
     return text
 
 
@@ -127,7 +127,7 @@ def _do_conflicts(params: Dict[str, Any], owner: str) -> str:
     if not conflicts:
         return f"Nenhum conflito de agenda para {label}."
     lines = [f"- {a['start'].strftime('%d/%m %H:%M')}: {a['title']} x {b['title']} ({b['start'].strftime('%H:%M')})" for a, b in conflicts]
-    return f"{len(conflicts)} conflito(s) em {label}:\n" + "\n".join(lines)
+    return f"{len(conflicts)} {'conflito' if len(conflicts) == 1 else 'conflitos'} em {label}:\n" + "\n".join(lines)
 
 
 def _do_free_slot(params: Dict[str, Any], owner: str) -> str:
@@ -153,15 +153,15 @@ def _do_brief(owner: str) -> str:
         parts.append(f"Compromissos restantes hoje:\n{agenda.format_events(events)}" if events else "Sem compromissos restantes hoje.")
         conflicts = agenda.find_conflicts(events)
         if conflicts:
-            parts.append(f"Há {len(conflicts)} conflito(s) de horário.")
+            parts.append(f"{'Há 1 conflito' if len(conflicts) == 1 else f'Há {len(conflicts)} conflitos'} de horário.")
     except Exception:
         parts.append("Não consegui consultar a agenda agora.")
     pending = policy.list_approvals(owner)
     if pending:
-        parts.append(f"{len(pending)} ação(oes) aguardando sua aprovação.")
+        parts.append(f"{len(pending)} {'ação' if len(pending) == 1 else 'ações'} aguardando sua aprovação.")
     candidates = learning.list_candidates(owner)
     if candidates:
-        parts.append(f"{len(candidates)} item(ns) aguardando revisão na memória.")
+        parts.append(f"{len(candidates)} {'item' if len(candidates) == 1 else 'itens'} para revisar na memória.")
     return "\n\n".join(parts)
 
 

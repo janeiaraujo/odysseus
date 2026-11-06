@@ -849,6 +849,11 @@ async def serve_gallery(request: Request):
 async def serve_tasks(request: Request):
     return await serve_index(request)
 
+
+@app.get("/jarvis")
+async def jarvis_page(request: Request):
+    return await serve_index(request)
+
 @app.get("/library")
 async def serve_library(request: Request):
     return await serve_index(request)
