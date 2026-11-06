@@ -18,7 +18,7 @@ _PATTERNS = [
     (re.compile(r"\bnvapi-[A-Za-z0-9_-]{12,}"), "***"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+"), "***"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), "***"),
-    (re.compile(r"(?i)\b(api[-_]?key|access_token|refresh_token|client_secret|password)=([^&\s]+)"), r"\1=***"),
+    (re.compile(r"(?i)\b(api[-_]?key|access_token|refresh_token|client_secret|password|token|secret)=([^&\s]+)"), r"\1=***"),
     (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), "<email>"),
 ]
 

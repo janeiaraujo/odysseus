@@ -31,8 +31,14 @@ DEFAULTS: Dict[str, Any] = {
     "learning": {"enabled": True, "auto_accept_explicit": True},
     "memory": {"inject_in_chat": True, "max_injected": 6},
     "voice": {"store_audio": False, "language": "pt", "tts_voice": ""},
-    "firebase": {"enabled": False, "project_id": "", "collections": ["memory", "devices"]},
-    "storage": {"backend": "local"},
+    "firebase": {"enabled": False, "project_id": "", "credentials_file": "", "collections": ["memory", "devices"], "encrypt_payloads": True},
+    "storage": {
+        "backend": "local",
+        # Stop before leaving Cloudflare's free tier (1M class A, 10M class B per month).
+        "max_class_a_month": 900000,
+        "max_class_b_month": 9000000,
+        "retention": {"backups_keep_last": 14},
+    },
     "home": {"enabled": False},
 }
 
