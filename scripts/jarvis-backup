@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""jarvis-backup: encrypted backup, verification and restore.
+
+    jarvis-backup keygen --out ~/jarvis-recovery.key
+    jarvis-backup create --key-file ~/jarvis-recovery.key --out ~/jarvis-backups/x.jrvb
+    jarvis-backup verify --key-file ~/jarvis-recovery.key x.jrvb
+    jarvis-backup restore --key-file ~/jarvis-recovery.key x.jrvb --data-dir data
+    jarvis-backup validate --data-dir data
+    jarvis-backup upload --key-file ~/jarvis-recovery.key x.jrvb      (needs R2 configured)
+    jarvis-backup download NAME --out x.jrvb
+
+The key can also come from JARVIS_BACKUP_KEY. Keep it outside this repository:
+without it no backup can be read, and nobody can recover it for you.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import secrets
+import sys
+from datetime import datetime
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+os.chdir(REPO)
+
+
+def _key(args) -> str:
+    if getattr(args, "key_file", None):
+        return Path(args.key_file).expanduser().read_text(encoding="utf-8").strip()
+    if os.environ.get("JARVIS_BACKUP_KEY"):
+        return os.environ["JARVIS_BACKUP_KEY"]
+    sys.exit("erro: informe --key-file ou JARVIS_BACKUP_KEY")
+
+
+def _chroma(args):
+    if getattr(args, "no_chroma", False):
+        return None
+    import chromadb
+    host = os.getenv("CHROMADB_HOST", "localhost")
+    port = int(os.getenv("CHROMADB_PORT", "8100"))
+    client = chromadb.HttpClient(host=host, port=port)
+    client.heartbeat()
+    return client
+
+
+def _emit(value) -> None:
+    print(json.dumps(value, ensure_ascii=False, indent=1))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="jarvis-backup", description="Backup criptografado do Jarvis")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("keygen")
+    p.add_argument("--out", required=True)
+    p = sub.add_parser("create")
+    p.add_argument("--key-file")
+    p.add_argument("--out")
+    p.add_argument("--data-dir", default=os.getenv("ODYSSEUS_DATA_DIR", "data"))
+    p.add_argument("--env-file", default=".env")
+    p.add_argument("--no-secrets", action="store_true", help="omite .app_key, auth, sessoes, vault e .env")
+    p.add_argument("--no-chroma", action="store_true")
+    p = sub.add_parser("verify")
+    p.add_argument("path")
+    p.add_argument("--key-file")
+    p = sub.add_parser("restore")
+    p.add_argument("path")
+    p.add_argument("--key-file")
+    p.add_argument("--data-dir", required=True)
+    p.add_argument("--env-target")
+    p.add_argument("--force", action="store_true", help="move o conteudo atual para o lado antes de restaurar")
+    p.add_argument("--no-chroma", action="store_true")
+    p = sub.add_parser("validate")
+    p.add_argument("--data-dir", required=True)
+    p = sub.add_parser("upload")
+    p.add_argument("path")
+    p.add_argument("--key-file")
+    p = sub.add_parser("download")
+    p.add_argument("name")
+    p.add_argument("--out", required=True)
+    args = parser.parse_args()
+
+    from src.jarvis import backup
+    try:
+        if args.cmd == "keygen":
+            out = Path(args.out).expanduser()
+            if out.exists():
+                sys.exit(f"erro: {out} ja existe; nao vou sobrescrever uma chave")
+            fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(secrets.token_urlsafe(32) + "\n")
+            _emit({"ok": True, "key_file": str(out), "aviso": "guarde fora deste computador; sem ela os backups nao abrem"})
+        elif args.cmd == "create":
+            out = Path(args.out or Path.home() / "jarvis-backups" / f"jarvis-{datetime.now():%Y%m%d-%H%M%S}.jrvb").expanduser()
+            _emit(backup.create_backup(out, _key(args), data_dir=Path(args.data_dir), env_file=Path(args.env_file),
+                                       include_secrets=not args.no_secrets, chroma_client=_chroma(args), repo=REPO))
+        elif args.cmd == "verify":
+            _emit(backup.verify_backup(Path(args.path), _key(args)))
+        elif args.cmd == "restore":
+            _emit(backup.restore_backup(Path(args.path), _key(args), data_dir=Path(args.data_dir),
+                                        env_target=Path(args.env_target) if args.env_target else None,
+                                        force=args.force, chroma_client=_chroma(args)))
+        elif args.cmd == "validate":
+            report = backup.validate_restored(Path(args.data_dir))
+            _emit(report)
+            sys.exit(0 if report["ok"] else 1)
+        elif args.cmd == "upload":
+            from src.jarvis.storage import get_backend
+            _key(args)
+            path = Path(args.path)
+            _emit(get_backend("r2").put_file(f"jarvis/backups/{path.name}", path))
+        elif args.cmd == "download":
+            from src.jarvis.storage import get_backend
+            _emit(get_backend("r2").get_file(f"jarvis/backups/{args.name}", Path(args.out).expanduser()))
+    except backup.BackupError as exc:
+        sys.exit(f"erro: {exc}")
+
+
+if __name__ == "__main__":
+    main()
