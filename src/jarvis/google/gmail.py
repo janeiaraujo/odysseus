@@ -102,6 +102,37 @@ async def search(owner: str, query: str = "", *, max_results: int = 20, account_
     return [await get_message(owner, m["id"], account_id) for m in body.get("messages", [])]
 
 
+MAX_ATTACHMENT_BYTES = 10_000_000
+TEXT_ATTACHMENTS = ("text/", "application/json", "application/csv")
+
+
+async def attachment_text(owner: str, message_id: str, attachment_id: str, *, account_id: Optional[str] = None, limit: int = 8000) -> Dict[str, Any]:
+    """Read one attachment on explicit request. Its text is untrusted data.
+
+    The type comes from Gmail's copy of the message, not from the caller.
+    """
+    account_id = account_id or default_account(owner, "gmail")
+    message = await get_message(owner, message_id, account_id)
+    meta = next((a for a in message["attachments"] if a["attachment_id"] == attachment_id), None)
+    if meta is None:
+        raise LookupError("anexo não encontrado nesta mensagem")
+    if int(meta.get("size") or 0) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("anexo grande demais para ler")
+    mime = meta.get("mime", "")
+    if mime != "application/pdf" and not mime.startswith(TEXT_ATTACHMENTS):
+        return {"filename": meta["filename"], "mime": mime, "supported": False, "text": ""}
+    body = _check(await google_request("GET", f"{API}/messages/{message_id}/attachments/{attachment_id}", account_id=account_id, owner=owner), "ler anexo")
+    raw = base64.urlsafe_b64decode(body.get("data", "") + "=" * (-len(body.get("data", "")) % 4))
+    if mime == "application/pdf":
+        import io
+        from pypdf import PdfReader
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages)
+    else:
+        text = raw.decode("utf-8", "replace")
+    audit.record("gmail.read_attachment", owner=owner, target=message_id)
+    return {"filename": meta["filename"], "mime": mime, "supported": True, "text": text[:limit], "truncated": len(text) > limit}
+
+
 def classify(message: Dict[str, Any]) -> Dict[str, Any]:
     """Rule-based and free. User categories in config take priority over the defaults."""
     subject_body = memory.normalize(f"{message.get('subject', '')} {message.get('body', '')[:3000]}")

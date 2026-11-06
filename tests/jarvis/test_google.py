@@ -630,3 +630,38 @@ def test_picker_flow_and_analysis_stays_hypothesis(google):
     assert out["description"] == "um cachorro na praia"
     stored = memory.list_items("ana")[0]
     assert stored["status"] == "hypothesis" and stored["trust"] == "untrusted" and stored["source_ref"] == "gphotos:p1"
+
+
+def test_client_credentials_from_downloaded_json(monkeypatch, tmp_path):
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("JARVIS_GOOGLE_CLIENT_FILE", str(tmp_path / "none.json"))
+    monkeypatch.setattr(oauth.os.path, "expanduser", lambda p: str(tmp_path / "absent"))
+    assert oauth.is_configured() is False
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"web": {"client_id": "abc.apps", "client_secret": "s3"}}))
+    monkeypatch.setenv("JARVIS_GOOGLE_CLIENT_FILE", str(path))
+    assert oauth.client_credentials() == ("abc.apps", "s3") and oauth.is_configured()
+
+
+def test_attachment_read_uses_gmail_metadata_not_caller(google):
+    _connect()
+    raw = _msg("1")
+    raw["payload"]["parts"].append({"mimeType": "text/plain", "filename": "nota.txt", "body": {"attachmentId": "a2", "size": 5}})
+    raw["payload"]["parts"].append({"mimeType": "video/mp4", "filename": "v.mp4", "body": {"attachmentId": "a3", "size": 5}})
+    google.route("GET", "/messages/1/attachments/a2", httpx.Response(200, json={"data": _b64("ola anexo")}))
+    google.route("GET", "/messages/1?", httpx.Response(200, json=raw))
+    out = asyncio.run(gmail.attachment_text("ana", "1", "a2"))
+    assert out["supported"] and out["text"] == "ola anexo"
+    assert asyncio.run(gmail.attachment_text("ana", "1", "a3"))["supported"] is False
+    with pytest.raises(LookupError):
+        asyncio.run(gmail.attachment_text("ana", "1", "forjado"))
+
+
+def test_photo_image_only_from_google_list(google):
+    _connect()
+    google.route("GET", "/mediaItems", httpx.Response(200, json={"mediaItems": [{"id": "p1", "type": "PHOTO", "mediaFile": {"baseUrl": "https://lh3.example/p1", "mimeType": "image/jpeg"}}]}))
+    google.route("GET", "lh3.example/p1=w64-h64", httpx.Response(200, content=b"thumb"))
+    assert asyncio.run(photos.fetch_image("ana", "s1", "p1", size=10))["content"] == b"thumb"
+    with pytest.raises(LookupError):
+        asyncio.run(photos.fetch_image("ana", "s1", "desconhecido"))

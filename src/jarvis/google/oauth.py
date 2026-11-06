@@ -70,16 +70,39 @@ def http_client(timeout: float = 30) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, transport=_transport)
 
 
+def _client_file() -> Optional[str]:
+    for path in (os.environ.get("JARVIS_GOOGLE_CLIENT_FILE", ""), "/app/secrets/google-oauth-client.json",
+                 os.path.expanduser("~/.config/jarvis/google-oauth-client.json")):
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
 def client_credentials() -> tuple:
+    """From the environment, or the JSON the Google console downloads, kept outside the repo."""
     client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
     secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    if not (client_id and secret):
+        path = _client_file()
+        if path:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                section = data.get("web") or data.get("installed") or {}
+                client_id, secret = section.get("client_id", ""), section.get("client_secret", "")
+            except (OSError, ValueError):
+                client_id, secret = "", ""
     if not client_id or not secret:
-        raise GoogleNotConfigured("defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET")
+        raise GoogleNotConfigured("defina GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET ou instale google-oauth-client.json")
     return client_id, secret
 
 
 def is_configured() -> bool:
-    return bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID") and os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"))
+    try:
+        client_credentials()
+        return True
+    except GoogleNotConfigured:
+        return False
 
 
 def _hash_state(state: str) -> str:
