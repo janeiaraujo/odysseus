@@ -118,7 +118,7 @@ function jarvisMark() {
 
 // ---- Painel ----
 async function renderPainel(root) {
-  const [status, candidates] = await Promise.all([api('/status'), api('/learning/candidates')]);
+  const [status, candidates, notes] = await Promise.all([api('/status'), api('/learning/candidates'), api('/notifications')]);
   let monitor = null;
   try { monitor = await api('/monitor'); } catch { /* non-admins don't see system data */ }
   const brief = h('div', { class: 'jarvis-answer', 'aria-live': 'polite' });
@@ -135,6 +135,9 @@ async function renderPainel(root) {
       monitor && stat('Custo no mês', `US$ ${monitor.usage.month_cost_usd.toFixed(2)}`, monitor.usage.budget_exceeded ? 'err' : null)),
     monitor && card('Serviços', h('div', { class: 'jarvis-chips' }, monitor.services.map((s) => badge(`${s.name}: ${s.online ? 'online' : 'offline'}`, s.online ? 'ok' : (s.required ? 'err' : null))))),
     candidates.candidates.length ? card('Revisar antes de guardar', candidates.candidates.slice(0, 3).map(candidateRow), sub('Veja todos na aba Memória.')) : null,
+    notes.notifications.length ? card('Notificações',
+      notes.notifications.slice(0, 8).map((n) => h('div', { class: 'jarvis-turn' }, h('strong', {}, n.title), n.read ? null : ' ', n.read ? null : badge('nova', 'warn'), n.body ? h('div', {}, n.body) : null, sub(fmtDate(n.created_at)))),
+      status.notifications_unread ? btn('Marcar como lidas', async () => { if (await act(() => api('/notifications/read', { method: 'POST' }), 'Notificações lidas.')) render(); }) : null) : null,
   );
 }
 
@@ -192,6 +195,11 @@ async function openMic() {
 }
 
 function closeMic() {
+  if (voiceState.browserHands) {
+    const recognizer = voiceState.browserHands;
+    voiceState.browserHands = null;
+    recognizer.stop();
+  }
   clearInterval(voiceState.vadTimer);
   voiceState.ctx?.close().catch(() => {});
   voiceState.stream?.getTracks().forEach((t) => t.stop());
@@ -208,43 +216,94 @@ function record(stream, onDone) {
   return recorder;
 }
 
-/** Hands-free: local energy-based voice detection. Audio leaves only while speech is detected. */
+function encodeWav(chunks, sampleRate) {
+  const length = chunks.reduce((sum, c) => sum + c.length, 0);
+  const view = new DataView(new ArrayBuffer(44 + length * 2));
+  const text = (offset, value) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); };
+  text(0, 'RIFF'); view.setUint32(4, 36 + length * 2, true); text(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, 'data'); view.setUint32(40, length * 2, true);
+  let offset = 44;
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i += 1) {
+      view.setInt16(offset, Math.max(-1, Math.min(1, chunk[i])) * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+/**
+ * Hands-free: voice detection runs locally, on raw samples, keeping about a second
+ * of audio from before speech starts. Without it the start of a phrase, which is
+ * exactly the wake word, would be lost. Audio leaves only when speech was detected.
+ */
 async function startHandsFree(log) {
   const stream = await openMic();
   voiceState.handsFree = true;
-  voiceState.ctx = new AudioContext();
-  const analyser = voiceState.ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  voiceState.ctx.createMediaStreamSource(stream).connect(analyser);
-  const data = new Uint8Array(analyser.fftSize);
-  let recorder = null;
-  let lastVoice = 0;
+  const ctx = new AudioContext();
+  voiceState.ctx = ctx;
+  await ctx.resume();
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const silent = ctx.createGain();
+  silent.gain.value = 0;
+  source.connect(processor);
+  processor.connect(silent);
+  silent.connect(ctx.destination);
+  const blockSeconds = 4096 / ctx.sampleRate;
+  const preRollBlocks = Math.ceil(1 / blockSeconds);
+  const silenceBlocks = Math.ceil(1.2 / blockSeconds);
+  const maxBlocks = Math.ceil(30 / blockSeconds);
+  const preRoll = [];
+  let speech = null;
+  let quiet = 0;
   setMic(true, 'ouvindo: diga "Jarvis"');
-  voiceState.vadTimer = setInterval(() => {
-    analyser.getByteTimeDomainData(data);
-    const energy = Math.sqrt(data.reduce((sum, v) => sum + ((v - 128) / 128) ** 2, 0) / data.length);
-    const now = Date.now();
-    if (energy > 0.03) {
-      lastVoice = now;
-      if (!recorder) {
+  processor.onaudioprocess = (event) => {
+    const block = new Float32Array(event.inputBuffer.getChannelData(0));
+    const energy = Math.sqrt(block.reduce((sum, v) => sum + v * v, 0) / block.length);
+    if (!speech) {
+      if (energy > 0.02) {
         stopSpeaking(); // barge-in: talking interrupts the assistant
-        recorder = record(stream, (blob) => {
-          if (blob.size < 2000) return;
-          const form = new FormData();
-          form.append('audio', blob, 'fala.webm');
-          form.append('wake_word', 'true');
-          sendTurn(form, log);
-        });
+        speech = [...preRoll, block];
+        preRoll.length = 0;
+        quiet = 0;
+      } else {
+        preRoll.push(block);
+        if (preRoll.length > preRollBlocks) preRoll.shift();
       }
-    } else if (recorder && now - lastVoice > 1200) {
-      recorder.stop();
-      recorder = null;
+      return;
     }
-  }, 100);
+    speech.push(block);
+    quiet = energy > 0.02 ? 0 : quiet + 1;
+    if (quiet >= silenceBlocks || speech.length >= maxBlocks) {
+      const form = new FormData();
+      form.append('audio', encodeWav(speech, ctx.sampleRate), 'fala.wav');
+      form.append('wake_word', 'true');
+      speech = null;
+      sendTurn(form, log);
+    }
+  };
+}
+
+function browserRecognizer(onText, { continuous = false } = {}) {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) return null;
+  const recognizer = new Recognition();
+  recognizer.lang = 'pt-BR';
+  recognizer.continuous = continuous;
+  recognizer.interimResults = false;
+  recognizer.onresult = (event) => {
+    const result = event.results[event.results.length - 1];
+    if (result?.isFinal) onText(result[0].transcript);
+  };
+  return recognizer;
 }
 
 async function renderVoz(root) {
   const status = await api('/voice/status');
+  const hasBrowserSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   const history = await api('/voice/history');
   const log = h('div', { class: 'jarvis-log' }, history.turns.map((t) => h('div', { class: 'jarvis-turn' }, h('div', { class: 'admin-toggle-sub' }, t.transcript), h('div', {}, t.reply))));
   const text = input({ placeholder: 'Ex.: Jarvis, quais compromissos tenho hoje?', 'aria-label': 'Comando', onkeydown: (e) => { if (e.key === 'Enter') sendText(); } });
@@ -257,9 +316,23 @@ async function renderVoz(root) {
   };
   const talk = btn('Segurar para falar', null);
   let recorder = null;
+  let browserTalk = null;
+  const sendSpoken = (spoken, wake) => {
+    const form = new FormData();
+    form.append('text', spoken);
+    if (wake) form.append('wake_word', 'true');
+    sendTurn(form, log);
+  };
   const pressStart = async () => {
-    if (!status.stt) { feedback('Configure o reconhecimento de voz em Configurações > STT.', 'warn'); return; }
     stopSpeaking();
+    if (!status.stt) {
+      browserTalk = browserRecognizer((spoken) => sendSpoken(spoken, false));
+      if (!browserTalk) { feedback('Este navegador não reconhece voz; configure o STT no servidor.', 'warn'); return; }
+      setMic(true, 'ouvindo');
+      browserTalk.onend = () => setMic(false, 'microfone desligado');
+      browserTalk.start();
+      return;
+    }
     const stream = await act(openMic);
     if (!stream) return;
     setMic(true, 'gravando');
@@ -270,22 +343,39 @@ async function renderVoz(root) {
       sendTurn(form, log);
     });
   };
-  const pressEnd = () => { if (recorder?.state === 'recording') recorder.stop(); recorder = null; };
+  const pressEnd = () => {
+    browserTalk?.stop();
+    browserTalk = null;
+    if (recorder?.state === 'recording') recorder.stop();
+    recorder = null;
+  };
   talk.addEventListener('pointerdown', pressStart);
   talk.addEventListener('pointerup', pressEnd);
   talk.addEventListener('pointerleave', pressEnd);
   const hands = h('input', { type: 'checkbox', 'aria-label': 'Mãos livres', onchange: async (e) => {
-    if (!e.target.checked) { closeMic(); return; }
-    if (!status.stt) { e.target.checked = false; feedback('Configure o reconhecimento de voz em Configurações > STT.', 'warn'); return; }
-    await act(() => startHandsFree(log));
+    if (!e.target.checked) {
+      voiceState.browserHands?.stop();
+      voiceState.browserHands = null;
+      closeMic();
+      return;
+    }
+    if (status.stt) { await act(() => startHandsFree(log)); return; }
+    const recognizer = browserRecognizer((spoken) => sendSpoken(spoken, true), { continuous: true });
+    if (!recognizer) { e.target.checked = false; feedback('Este navegador não reconhece voz; configure o STT no servidor.', 'warn'); return; }
+    voiceState.browserHands = recognizer;
+    recognizer.onend = () => { if (voiceState.browserHands === recognizer) recognizer.start(); };
+    setMic(true, 'ouvindo: diga "Jarvis"');
+    recognizer.start();
   } });
   root.append(
     card('Comando', row(text, btn('Enviar', sendText)),
       sub('Comandos de agenda, memória e dispositivos são respondidos sem gastar tokens.')),
-    card('Voz', h('div', { class: 'jarvis-chips' }, badge(`Transcrição: ${status.stt ? 'pronta' : 'não configurada'}`, status.stt ? 'ok' : 'warn'), badge(`Fala: ${status.tts ? 'servidor' : 'navegador'}`, status.tts ? 'ok' : null), h('span', { id: 'jarvis-mic-state', class: 'jarvis-badge' }, 'microfone desligado')),
+    card('Voz', h('div', { class: 'jarvis-chips' }, badge(`Transcrição: ${status.stt ? 'no servidor' : hasBrowserSpeech ? 'do navegador' : 'não configurada'}`, status.stt ? 'ok' : 'warn'), badge(`Fala: ${status.tts ? 'servidor' : 'navegador'}`, status.tts ? 'ok' : null), h('span', { id: 'jarvis-mic-state', class: 'jarvis-badge' }, 'microfone desligado')),
       row(talk, btn('Parar fala', stopSpeaking, 'delete')),
       row(h('label', { class: 'jarvis-check' }, hands, ' Mãos livres (só com a aba aberta)'), h('label', { class: 'jarvis-check' }, h('input', { type: 'checkbox', id: 'jarvis-speak', checked: true }), ' Falar respostas'), h('label', { class: 'jarvis-check' }, 'Volume ', h('input', { type: 'range', id: 'jarvis-volume', min: 0, max: 1, step: 0.1, value: 1 }))),
-      sub(`Áudio não é gravado em disco${status.store_audio ? ' (armazenamento ligado)' : ''}. No modo mãos livres, o áudio só é enviado quando há fala, e o servidor só age se ouvir "Jarvis".`)),
+      sub(status.stt
+        ? `O áudio é transcrito no seu servidor e não é gravado em disco${status.store_audio ? ' (armazenamento ligado)' : ''}. No modo mãos livres, ele só é enviado quando há fala, e o Jarvis só age se ouvir o nome dele.`
+        : 'Sem transcrição no servidor, é usado o reconhecimento do navegador. No Chrome, isso envia o áudio ao Google enquanto o microfone estiver ativo.')),
     card('Histórico', log, btn('Apagar histórico', async () => { if (await act(() => api('/voice/history', { method: 'DELETE' }), 'Histórico apagado.')) log.replaceChildren(); }, 'delete')),
   );
 }
@@ -336,9 +426,18 @@ async function renderMemoria(root) {
     statsBox.replaceChildren(stat('Total', data.stats.total), ...Object.entries(data.stats.by_kind).map(([k, n]) => stat(KIND_PT[k] || k, n)), data.stats.by_status.conflicted ? stat('Em conflito', data.stats.by_status.conflicted, 'err') : '');
   };
   const newText = input({ placeholder: 'O que devo lembrar?', 'aria-label': 'Nova memória' });
-  const candidates = await api('/learning/candidates');
+  const [candidates, conflictData] = await Promise.all([api('/learning/candidates'), api('/memory/conflicts')]);
+  const conflictCard = (pair) => {
+    const box = h('div', { class: 'jarvis-mission' });
+    const keep = (winner, loser) => btn('Esta está certa', async () => {
+      if (await act(() => api('/memory/resolve', { json: { keep_id: winner.id, drop_id: loser.id } }), 'Conflito resolvido.')) { box.remove(); load(); }
+    });
+    box.append(row(h('div', { class: 'grow' }, pair.a.text), keep(pair.a, pair.b)), row(h('div', { class: 'grow' }, pair.b.text), keep(pair.b, pair.a)));
+    return box;
+  };
   root.append(
     statsBox,
+    conflictData.conflicts.length ? card('Conflitos para decidir', conflictData.conflicts.map(conflictCard), sub('A outra versão sai da busca, mas continua no histórico.')) : null,
     card('Nova memória', row(newText, btn('Guardar', async () => {
       const out = await act(() => api('/memory', { json: { text: newText.value } }), (r) => (r.action === 'conflict' ? 'Guardada, mas conflita com outra memória.' : r.action === 'duplicate' ? 'Já estava guardada.' : 'Guardada.'));
       if (out) { newText.value = ''; load(); }
@@ -373,6 +472,12 @@ async function renderMissoes(root) {
   root.append(
     card('Nova missão', row(goal, cron, btn('Planejar', async () => { if (await act(() => api('/missions/plan', { json: { goal: goal.value, cron: cron.value || null } }), 'Missão criada.')) render(); })),
       sub('Um modelo propõe os passos, mas só ações do catálogo podem rodar, cada uma com seu nível de risco.')),
+    card('Rotinas recomendadas', btn('Ativar o que se aplica', async () => {
+      const r = await act(() => api('/routines', { method: 'POST' }));
+      if (!r) return;
+      feedback(r.created.length ? `Ativadas: ${r.created.join(', ')}.` : 'Nada novo para ativar.');
+      render();
+    }), sub('Backup criptografado, consolidação de memória e sincronizações do Google que estiverem conectadas. Nada aqui envia mensagens.')),
     card('Missões', data.missions.length ? data.missions.map((m) => h('div', { class: 'jarvis-mission' },
       row(h('div', { class: 'grow' }, m.title, m.cron ? sub(`Agendada (${m.cron}); próxima: ${fmtDate(m.next_run_at)}; ${m.run_count} execuções`) : null), statusBadge(m.status),
         !['cancelled', 'completed', 'failed'].includes(m.status) ? btn('Cancelar', async () => { if (await act(() => api(`/missions/${m.id}`, { method: 'DELETE' }), 'Cancelada.')) render(); }, 'delete') : null),
@@ -381,6 +486,23 @@ async function renderMissoes(root) {
 }
 
 // ---- E-mail ----
+function messageRow(m) {
+  const detail = h('div', { class: 'jarvis-answer' });
+  const show = (text) => { detail.textContent = text; };
+  return h('div', { class: 'jarvis-mission' },
+    row(h('div', { class: 'grow' }, m.subject || '(sem assunto)', sub(`${m.from} · ${m.snippet}`)),
+      btn('Resumir', async () => {
+        show('Resumindo...');
+        const r = await act(() => api(`/gmail/messages/${m.id}/summary`, { method: 'POST' }));
+        show(r?.summary || '');
+      })),
+    (m.attachments || []).filter((a) => a.attachment_id).map((a) => row(h('div', { class: 'grow admin-toggle-sub' }, a.filename), btn('Ler anexo', async () => {
+      const r = await act(() => api(`/gmail/messages/${m.id}/attachments/${encodeURIComponent(a.attachment_id)}`));
+      if (r) show(r.supported ? r.text : `Formato não suportado: ${r.mime}`);
+    }))),
+    detail);
+}
+
 async function renderEmail(root) {
   const [insights, queue] = await Promise.all([api('/gmail/insights').catch(() => ({ insights: [] })), api('/gmail/outbox').catch(() => ({ queue: [] }))]);
   const out = h('div', { class: 'jarvis-table' });
@@ -392,7 +514,7 @@ async function renderEmail(root) {
   const results = h('div', { class: 'jarvis-table' });
   const doSearch = async () => {
     const data = await act(() => api(`/gmail/search?text=${encodeURIComponent(q.value)}`));
-    if (data) results.replaceChildren(...(data.messages.length ? data.messages.map((m) => row(h('div', { class: 'grow' }, m.subject || '(sem assunto)', sub(`${m.from} · ${m.snippet}`)))) : [empty('Nada encontrado.')]));
+    if (data) results.replaceChildren(...(data.messages.length ? data.messages.map(messageRow) : [empty('Nada encontrado.')]));
   };
   const payload = () => ({ to: to.value.split(',').map((x) => x.trim()).filter(Boolean), subject: subject.value, body: body.value, send_at: when.value || null, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
   root.append(
@@ -406,7 +528,41 @@ async function renderEmail(root) {
 }
 
 // ---- Documentos ----
+async function pickPhotos(gallery) {
+  const session = await act(() => api('/photos/sessions', { method: 'POST' }));
+  if (!session?.picker_uri) return;
+  window.open(session.picker_uri, '_blank', 'noopener');
+  gallery.replaceChildren(sub('Aguardando sua seleção na janela do Google...'));
+  const started = Date.now();
+  const interval = Math.max(Number.parseFloat(session.poll?.pollInterval) || 3, 3) * 1000;
+  while (Date.now() - started < 300000 && _open) {
+    await new Promise((resolve) => { setTimeout(resolve, interval); });
+    const state = await api(`/photos/sessions/${session.session_id}`).catch(() => null);
+    if (state?.ready) {
+      renderGallery(gallery, session.session_id, state.items);
+      return;
+    }
+  }
+  gallery.replaceChildren(sub('Seleção não concluída.'));
+}
+
+function renderGallery(gallery, sessionId, items) {
+  if (!items.length) { gallery.replaceChildren(sub('Nenhuma foto selecionada.')); return; }
+  gallery.replaceChildren(h('div', { class: 'jarvis-gallery' }, items.map((item) => {
+    const note = h('div', { class: 'admin-toggle-sub' });
+    return h('figure', { class: 'jarvis-photo' },
+      item.mime?.startsWith('image/') ? h('img', { src: `${API}/photos/sessions/${sessionId}/items/${encodeURIComponent(item.id)}/image?size=256`, alt: item.filename || 'Foto', loading: 'lazy' }) : sub(item.filename || 'Vídeo'),
+      item.mime?.startsWith('image/') ? btn('Analisar', async () => {
+        note.textContent = 'Analisando...';
+        const r = await act(() => api('/photos/analyze', { json: { session_id: sessionId, item_id: item.id } }));
+        note.textContent = r?.description || '';
+      }) : null,
+      note);
+  })));
+}
+
 async function renderDocumentos(root) {
+  const gallery = h('div', {});
   const allowed = await api('/drive/allowed');
   const folders = h('textarea', { class: 'jarvis-input', rows: 2, placeholder: 'IDs de pasta do Drive, um por linha', 'aria-label': 'Pastas autorizadas' }, allowed.folder_ids.join('\n'));
   const q = input({ placeholder: 'Ex.: contrato mais recente', 'aria-label': 'Buscar documentos', onkeydown: (e) => { if (e.key === 'Enter') doSearch(); } });
@@ -418,7 +574,7 @@ async function renderDocumentos(root) {
   root.append(
     card('Pastas que podem alimentar a memória', folders, row(btn('Salvar', () => act(() => api('/drive/allowed', { method: 'PUT', json: { folder_ids: folders.value.split('\n').map((x) => x.trim()).filter(Boolean) } }), 'Pastas atualizadas.')), btn('Sincronizar agora', () => act(() => api('/drive/sync', { method: 'POST' }), (r) => `${r.indexed} indexados, ${r.unchanged} sem mudança.`))), sub('Nada é indexado sem estar nesta lista. Arquivos que saem dela são removidos do índice.')),
     card('Buscar', row(q, btn('Buscar', doSearch)), results),
-    card('Google Fotos', btn('Escolher fotos', async () => { const s = await act(() => api('/photos/sessions', { method: 'POST' })); if (s?.picker_uri) window.open(s.picker_uri, '_blank', 'noopener'); }), sub('Você escolhe no seletor do Google, e o Jarvis só vê essas fotos. Desde 2025 o Google não dá acesso à biblioteca inteira.')),
+    card('Google Fotos', btn('Escolher fotos', () => pickPhotos(gallery)), gallery, sub('Você escolhe no seletor do Google, e o Jarvis só vê essas fotos. Desde 2025 o Google não dá acesso à biblioteca inteira. As imagens não são guardadas.')),
   );
 }
 
@@ -456,7 +612,10 @@ async function renderDispositivos(root) {
   root.append(
     card('Home Assistant', row(url, token, btn('Salvar', async () => { if (await act(() => api('/home/config', { method: 'PUT', json: { url: url.value, token: token.value || null } }), 'Configuração salva.')) render(); })), row(badge(data.configured ? 'configurado' : 'não configurado', data.configured ? 'ok' : null), btn('Descobrir dispositivos', async () => { if (await act(() => api('/home/discover', { method: 'POST' }), (r) => `${r.discovered} dispositivos encontrados.`)) render(); }))),
     card('Adicionar manualmente', row(name, entity, area), row(h('label', { class: 'jarvis-check' }, critical, ' Risco físico: sempre pedir aprovação'), btn('Adicionar', async () => { if (await act(() => api('/home/devices', { json: { name: name.value, entity_id: entity.value, area: area.value, critical: critical.checked } }), 'Adicionado.')) render(); }))),
-    card('Dispositivos', data.devices.length ? data.devices.map((d) => row(h('div', { class: 'grow' }, d.name, sub(`${d.area ? `${d.area} · ` : ''}${d.entity_id}`)), d.critical ? badge('crítico', 'warn') : null, (OPS[d.domain] || []).map((op) => btn(OPS_PT[op], () => act(() => api('/home/control', { json: { device_id: d.id, op } }), 'Comando enviado.'))), btn('Remover', async () => { if (await act(() => api(`/home/devices/${d.id}`, { method: 'DELETE' }))) render(); }, 'delete'))) : empty('Nenhum dispositivo.'), sub('Fechaduras, portões e alarmes sempre pedem aprovação, independentemente de qualquer regra ou modelo.')),
+    card('Dispositivos', data.devices.length ? data.devices.map((d) => row(h('div', { class: 'grow' }, d.name, sub(`${d.area ? `${d.area} · ` : ''}${d.entity_id}`)), d.critical ? badge('crítico', 'warn') : null, (OPS[d.domain] || []).map((op) => btn(OPS_PT[op], () => act(() => api('/home/control', { json: { device_id: d.id, op } }), 'Comando enviado.'))),
+      ['sensor', 'binary_sensor'].includes(d.domain) ? btn('Ler', async () => { const s = await act(() => api(`/home/devices/${d.id}/state`)); if (s) feedback(`${d.name}: ${s.state}${s.unit ? ` ${s.unit}` : ''}`); }) : null,
+      d.domain === 'camera' ? btn('Ver agora', () => { window.open(`${API}/home/devices/${d.id}/snapshot`, '_blank', 'noopener'); }) : null,
+      btn('Remover', async () => { if (await act(() => api(`/home/devices/${d.id}`, { method: 'DELETE' }))) render(); }, 'delete'))) : empty('Nenhum dispositivo.'), sub('Fechaduras, portões e alarmes sempre pedem aprovação, independentemente de qualquer regra ou modelo.')),
   );
 }
 
@@ -579,7 +738,34 @@ async function refreshAttention() {
   } catch { /* logged out or offline: try again on the next tick */ }
 }
 
+/** Adds "Automático" to the chat's model picker. Choosing a model by hand turns it off. */
+async function initAutoRouting() {
+  const menu = document.getElementById('model-picker-menu');
+  const list = document.getElementById('model-picker-list');
+  if (!menu || !list) return;
+  const box = h('input', { type: 'checkbox', 'aria-label': 'Roteamento automático' });
+  const rowEl = h('label', { class: 'jarvis-auto-row', title: 'O Jarvis escolhe o modelo a cada mensagem, seguindo as regras de custo' }, box, ' Automático (Jarvis)');
+  list.parentNode.insertBefore(rowEl, list);
+  let enabled = false;
+  try { enabled = (await api('/routing')).auto; } catch { rowEl.remove(); return; }
+  box.checked = enabled;
+  box.addEventListener('change', async () => {
+    const wanted = box.checked;
+    try {
+      await api('/routing', { method: 'PUT', json: { auto: wanted } });
+      enabled = wanted;
+    } catch { box.checked = enabled; }
+  });
+  document.addEventListener('odysseus:model-picked', async () => {
+    if (!enabled) return;
+    enabled = false;
+    box.checked = false;
+    await api('/routing', { method: 'PUT', json: { auto: false } }).catch(() => {});
+  });
+}
+
 export function initJarvis() {
+  initAutoRouting();
   refreshAttention();
   setInterval(refreshAttention, 60000);
   const params = new URLSearchParams(window.location.search);

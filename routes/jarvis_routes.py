@@ -79,6 +79,10 @@ def _redirect_uri(request: Request, path: str) -> str:
     return base.rstrip("/") + path
 
 
+class RoutingBody(BaseModel):
+    auto: bool
+
+
 class CommandBody(BaseModel):
     text: str = Field(max_length=4000)
 
@@ -200,16 +204,6 @@ async def _describe_image(owner: str, image: bytes, mime: str) -> str:
     return await complete(owner, photos.vision_request(image, mime), requires=["vision"], purpose="vision")
 
 
-def _backup_key() -> str:
-    key_file = os.environ.get("JARVIS_BACKUP_KEY_FILE", "")
-    if key_file and os.path.isfile(key_file):
-        return Path(key_file).read_text(encoding="utf-8").strip()
-    key = os.environ.get("JARVIS_BACKUP_KEY", "")
-    if not key:
-        raise HTTPException(503, "defina JARVIS_BACKUP_KEY_FILE para criar backups pela interface")
-    return key
-
-
 def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     r = APIRouter(prefix="/api/jarvis", tags=["jarvis"], route_class=_JarvisRoute)
     login_limiter = RateLimiter(max_requests=15, window_seconds=60)
@@ -277,6 +271,17 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
             raise HTTPException(404, "nenhum modelo disponivel dentro das regras de custo")
         return choice.to_dict()
 
+    @r.get("/routing")
+    async def routing_get(request: Request):
+        return {"auto": model_router.auto_chat_enabled(_owner(request))}
+
+    @r.put("/routing")
+    async def routing_set(body: RoutingBody, request: Request):
+        owner = _owner(request)
+        model_router.set_auto_chat(owner, body.auto)
+        audit.record("router.auto_chat", owner=owner, risk="reversible", enabled=body.auto)
+        return {"auto": body.auto}
+
     @r.get("/usage")
     async def usage(request: Request, days: int = 30):
         return model_router.usage_summary(_owner(request), days=days)
@@ -310,6 +315,10 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     @r.get("/memory/{memory_id}/versions")
     async def memory_versions(memory_id: str, request: Request):
         return {"versions": memory.versions(memory_id, owner=_owner(request))}
+
+    @r.get("/memory/conflicts")
+    async def memory_conflicts(request: Request):
+        return {"conflicts": memory.conflicts(_owner(request))}
 
     @r.post("/memory/resolve")
     async def memory_resolve(body: ResolveBody, request: Request):
@@ -359,6 +368,10 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     async def missions_list(request: Request):
         return {"missions": missions.list_missions(_admin(request))}
 
+    @r.post("/routines")
+    async def routines_enable(request: Request):
+        return missions.enable_recommended(_admin(request))
+
     @r.get("/missions/catalog")
     async def missions_catalog(request: Request):
         _admin(request)
@@ -404,6 +417,7 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         if error or not code:
             return RedirectResponse("/?jarvis=google_denied", status_code=302)
         await oauth.complete_connect(state, code, _redirect_uri(request, "/api/jarvis/google/callback"), owner)
+        missions.enable_recommended(owner)
         return RedirectResponse("/?jarvis=google_connected", status_code=302)
 
     @r.delete("/google/accounts/{account_id}")
@@ -483,6 +497,17 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     async def gmail_triage(request: Request, apply_labels: bool = False):
         return await gmail.triage(_admin(request), apply_labels=apply_labels)
 
+    @r.get("/gmail/messages/{message_id}/attachments/{attachment_id}")
+    async def gmail_attachment(message_id: str, attachment_id: str, request: Request):
+        return await gmail.attachment_text(_admin(request), message_id, attachment_id)
+
+    @r.post("/gmail/messages/{message_id}/summary")
+    async def gmail_summary(message_id: str, request: Request):
+        owner = _admin(request)
+        from src.jarvis.llm import complete
+        message = await gmail.get_message(owner, message_id)
+        return {"summary": await complete(owner, gmail.summarize_prompt(message), purpose="email")}
+
     @r.get("/gmail/insights")
     async def gmail_insights(request: Request, important_only: bool = False):
         return {"insights": gmail.insights(_admin(request), important_only=important_only)}
@@ -543,6 +568,11 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         items = await photos.list_items(owner, session_id) if state["ready"] else []
         return {**state, "items": [{k: v for k, v in i.items() if k != "base_url"} for i in items]}
 
+    @r.get("/photos/sessions/{session_id}/items/{item_id}/image")
+    async def photos_image(session_id: str, item_id: str, request: Request, size: int = 512):
+        image = await photos.fetch_image(_admin(request), session_id, item_id, size=size)
+        return Response(content=image["content"], media_type=image["mime"], headers={"Cache-Control": "no-store"})
+
     @r.post("/photos/analyze")
     async def photos_analyze(body: AnalyzeBody, request: Request):
         """The item is looked up in Google's own list, so a caller can't supply a URL."""
@@ -588,6 +618,21 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
         if not home.delete_device(_admin(request), device_id):
             raise LookupError("dispositivo não encontrado")
         return {"deleted": True}
+
+    @r.get("/home/devices/{device_id}/state")
+    async def home_state_read(device_id: str, request: Request):
+        device = next((d for d in home.list_devices(_admin(request)) if d["id"] == device_id), None)
+        if device is None:
+            raise LookupError("dispositivo não encontrado")
+        return await home.read_device(device)
+
+    @r.get("/home/devices/{device_id}/snapshot")
+    async def home_snapshot(device_id: str, request: Request):
+        owner = _admin(request)
+        device = next((d for d in home.list_devices(owner) if d["id"] == device_id), None)
+        if device is None:
+            raise LookupError("dispositivo não encontrado")
+        return Response(content=await home.camera_snapshot(device, owner=owner), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @r.post("/home/control")
     async def home_control(body: ControlBody, request: Request):
@@ -657,27 +702,21 @@ def setup_jarvis_routes(memory_manager: Any = None) -> APIRouter:
     @r.get("/backups")
     async def backups_list(request: Request):
         _admin(request)
-        return {"backups": observability.backups(), "key_configured": bool(os.environ.get("JARVIS_BACKUP_KEY_FILE") or os.environ.get("JARVIS_BACKUP_KEY"))}
+        from src.jarvis import backup as _backup
+        return {"backups": observability.backups(), "key_configured": bool(_backup.configured_key())}
 
     @r.post("/backups")
     async def backups_create(body: BackupBody, request: Request):
         """Runs in a worker thread: encrypting must not block the event loop."""
         import asyncio
         owner = _admin(request)
-        from src.constants import DATA_DIR
         from src.jarvis import backup
-        key = _backup_key()
-        folder = Path(os.environ.get("JARVIS_BACKUP_DIR", str(Path.home() / "jarvis-backups")))
-
-        def run() -> Dict[str, Any]:
-            chroma = None
-            try:
-                from src.chroma_client import get_chroma_client
-                chroma = get_chroma_client()
-            except Exception as exc:
-                logger.warning("backup without ChromaDB: %s", redact_text(exc))
-            return {**backup.create_backup(folder / f"jarvis-{datetime.now():%Y%m%d-%H%M%S}.jrvb", key, data_dir=Path(DATA_DIR), include_secrets=body.include_secrets, chroma_client=chroma), "chroma_included": chroma is not None}
-        result = await asyncio.to_thread(run)
+        if not backup.configured_key():
+            raise HTTPException(503, "defina JARVIS_BACKUP_KEY_FILE para criar backups pela interface")
+        try:
+            result = await asyncio.to_thread(backup.run_configured, body.include_secrets)
+        except backup.BackupError as exc:
+            raise HTTPException(500, redact_text(exc)) from None
         audit.record("backup.create", owner=owner, risk="reversible", files=result["files"], chroma=result["chroma_included"])
         return result
 

@@ -305,6 +305,21 @@ def resolve_conflict(keep_id: str, drop_id: str, *, owner: Optional[str] = "") -
     return item
 
 
+def conflicts(owner: Optional[str] = "") -> List[Dict[str, Any]]:
+    """Pairs waiting for the user to decide which is right."""
+    with session_scope() as db:
+        links = db.query(MemoryLink).filter(MemoryLink.relation == "conflicts").limit(200).all()
+        out = []
+        for link in links:
+            a, b = db.get(MemoryItem, link.src_id), db.get(MemoryItem, link.dst_id)
+            if not a or not b or a.deleted_at or b.deleted_at or a.owner != (owner or "") or b.owner != (owner or ""):
+                continue
+            if a.status == "superseded" or b.status == "superseded":
+                continue
+            out.append({"a": to_dict(a), "b": to_dict(b)})
+        return out
+
+
 def versions(memory_id: str, owner: Optional[str] = "") -> List[Dict[str, Any]]:
     with session_scope() as db:
         _owned(db, memory_id, owner)
